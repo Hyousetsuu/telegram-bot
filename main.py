@@ -33,7 +33,45 @@ def menu(message):
     markup.add(btn5, btn6)
     markup.add(btn7)
 
-    bot.send_message(message.chat.id, "👋 Hai! Pilih fitur di bawah:", reply_markup=markup)
+    # Ambil data user
+    user = message.from_user or {}
+    first_name = getattr(user, "first_name", "") or ""
+    last_name = getattr(user, "last_name", "") or ""
+    username = getattr(user, "username", None)
+    user_id = getattr(user, "id", None)
+
+    if username:
+        display = f"@{username}"
+    else:
+        display = (first_name + (" " + last_name if last_name else "")).strip() or "Teman"
+
+    # Mention yang bisa diklik
+    if user_id:
+        mention = f'<a href="tg://user?id={user_id}">{display}</a>'
+    else:
+        mention = display
+
+    welcome_text = (
+        f"🤖 <b>Selamat datang di FENDLI BOT!</b>\n\n"
+        f"Halo, {mention}! 👋\n"
+        "Aku siap bantu kamu ambil video atau musik favoritmu dari berbagai platform 🎶\n\n"
+        "Pilih fitur yang kamu mau di bawah ini ⬇️"
+    )
+
+    # Kirim gambar + pesan sambutan
+    try:
+        photo_path = "Logo.png"  # ubah ke nama file gambar kamu
+        with open(photo_path, "rb") as photo:
+            bot.send_photo(
+                message.chat.id,
+                photo,
+                caption=welcome_text,
+                parse_mode="HTML",
+                reply_markup=markup
+            )
+    except Exception as e:
+        print(f"⚠️ Gagal kirim foto: {e}")
+        bot.send_message(message.chat.id, welcome_text, parse_mode="HTML", reply_markup=markup)
 
 
 @bot.callback_query_handler(func=lambda call: True)
