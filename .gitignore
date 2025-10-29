@@ -1,8 +1,6 @@
-# Jangan upload token dan environment
 .env
 .venv/
 
-# File cache / temporary
 __pycache__/
 *.pyc
 *.pyo
