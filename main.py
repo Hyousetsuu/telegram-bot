@@ -153,44 +153,124 @@ def download_youtube_video(message, url):
                 except:
                     pass
 
+# ==============================
+# 🎬 TikTok Downloader (lebih stabil)
+# ==============================
 def download_tiktok_video(message, url):
     try:
         bot.send_message(message.chat.id, "🎬 Mengambil video TikTok...")
-        resp = requests.get("https://www.tikwm.com/api/", params={"url": url}, timeout=10).json()
-        video_url = resp.get("data", {}).get("play")
-        if not video_url:
-            raise Exception("Tidak menemukan link video.")
+
         filename = "tiktok_video.mp4"
-        with open(filename, "wb") as f:
-            f.write(requests.get(video_url, timeout=20).content)
-        bot.send_video(message.chat.id, open(filename, "rb"))
-        os.remove(filename)
+        success = False
+
+        # 🔁 Coba download video maksimal 3 kali
+        for attempt in range(3):
+            try:
+                resp = requests.get("https://www.tikwm.com/api/", params={"url": url}, timeout=15)
+                data = resp.json()
+                video_url = data.get("data", {}).get("play")
+                if not video_url:
+                    raise Exception("Link video tidak ditemukan.")
+
+                # Download video dengan stream 
+                with requests.get(video_url, stream=True, timeout=120) as r:
+                    r.raise_for_status()
+                    with open(filename, "wb") as f:
+                        for chunk in r.iter_content(chunk_size=8192):
+                            if chunk:
+                                f.write(chunk)
+
+                success = True
+                break  # keluar dari loop kalau berhasil download
+
+            except Exception as e:
+                print(f"⚠️ Percobaan {attempt+1}/3 gagal download: {e}")
+                bot.send_message(message.chat.id, f"⚠️ Percobaan {attempt+1}/3 gagal download, mencoba lagi...")
+                time.sleep(5)
+
+        if not success:
+            bot.send_message(message.chat.id, "❌ Gagal mengunduh video TikTok setelah 3 percobaan.")
+            return
+
+        # 🔍 Cek ukuran file
+        size = os.path.getsize(filename)
+        bot.send_message(message.chat.id, f"✅ Download selesai. Ukuran file: {size / 1024 / 1024:.2f} MB")
+
+        # ========================
+        # 🔁 Kirim ke Telegram (retry upload)
+        # ========================
+        def send_with_retry(path, caption, as_document=False):
+            """Mengirim file ke Telegram dengan retry otomatis"""
+            max_retries = 3
+            retry_delay = 15  # jeda antar percobaan dalam detik
+            upload_timeout = 900  # waktu maksimum upload 15 menit
+
+            for attempt in range(max_retries):
+                try:
+                    with open(path, "rb") as f:
+                        if as_document:
+                            bot.send_document(
+                                message.chat.id,
+                                f,
+                                caption=caption,
+                                timeout=upload_timeout
+                            )
+                        else:
+                            bot.send_video(
+                                message.chat.id,
+                                f,
+                                caption=caption,
+                                timeout=upload_timeout,
+                                supports_streaming=True
+                            )
+                    return True
+                except Exception as e:
+                    print(f"⚠️ Percobaan {attempt+1}/{max_retries} gagal upload: {e}")
+                    bot.send_message(
+                        message.chat.id,
+                        f"⚠️ Upload percobaan {attempt+1}/{max_retries} gagal (coba lagi {retry_delay}s)..."
+                    )
+                    time.sleep(retry_delay)
+            return False
+
+        bot.send_message(message.chat.id, "🎬 Mengirim video ke Telegram... (harap tunggu beberapa menit)")
+
+        # Jika file >45MB → kirim sebagai dokumen
+        as_doc = size > 45 * 1024 * 1024
+        if send_with_retry(filename, "🎥 Video TikTok berhasil diunduh!", as_document=as_doc):
+            bot.send_message(message.chat.id, "✅ Video berhasil dikirim!")
+        else:
+            bot.send_message(message.chat.id, "❌ Gagal mengirim video setelah beberapa percobaan.")
+
     except Exception as e:
         bot.send_message(message.chat.id, f"⚠️ Gagal download TikTok.\nError: {e}")
 
+    finally:
+        if os.path.exists(filename):
+            try:
+                os.remove(filename)
+            except:
+                pass
 
+# ==============================
+# 📸 Instagram Downloader (pakai alternatif)
+# ==============================
 def download_instagram_video(message, url):
     try:
         bot.send_message(message.chat.id, "📸 Mengambil video Instagram...")
-        resp = requests.post(
-            "https://snapinsta.app/api/ajaxSearch",
-            data={"q": url, "t": "media"},
-            headers={
-                "User-Agent": "Mozilla/5.0",
-                "X-Requested-With": "XMLHttpRequest",
-                "Referer": "https://snapinsta.app/"
-            },
-            timeout=15
-        )
-        html = resp.text
-        match = re.search(r'href="(https://[^"]+\.mp4)"', html)
-        if not match:
-            raise Exception("Tidak menemukan link video valid.")
-        video_url = match.group(1)
+        # Gunakan API alternatif, lebih stabil
+        resp = requests.get("https://instasupersave.com/api/convert", params={"url": url}, timeout=20)
+        data = resp.json()
+        if not data or "url" not in data.get("media", [{}])[0]:
+            raise Exception("Tidak menemukan video valid.")
+        video_url = data["media"][0]["url"]
         filename = "instagram_video.mp4"
-        with open(filename, "wb") as f:
-            f.write(requests.get(video_url, timeout=20).content)
-        bot.send_video(message.chat.id, open(filename, "rb"))
+        with requests.get(video_url, stream=True, timeout=120) as r:
+            with open(filename, "wb") as f:
+                for chunk in r.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+        bot.send_video(message.chat.id, open(filename, "rb"), supports_streaming=True)
         os.remove(filename)
     except Exception as e:
         bot.send_message(message.chat.id, f"⚠️ Gagal download Instagram.\nError: {e}")
@@ -237,10 +317,15 @@ if __name__ == "__main__":
             bot.infinity_polling(timeout=60, long_polling_timeout=60)
         except requests.exceptions.ConnectionError as e:
             print(f"⚠️ Koneksi ke Telegram terputus: {e}")
-            time.sleep(10)  # tunggu 10 detik sebelum reconnect
+            time.sleep(10)
+            continue
+        except ConnectionResetError as e:
+            print(f"⚠️ Koneksi direset oleh host: {e}")
+            time.sleep(10)
             continue
         except Exception as e:
             print(f"⚠️ Error umum di polling: {e}")
             time.sleep(5)
             continue
+
 
