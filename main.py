@@ -98,7 +98,7 @@ def download_youtube_video(message, url):
         time.sleep(2)  # beri waktu agar file tidak terkunci
 
         def send_with_retry(path, caption, as_document=False):
-            """Mengirim file dengan retry otomatis"""
+            """Mengirim file ke Telegram dengan retry otomatis"""
             max_retries = 5
             for attempt in range(max_retries):
                 try:
@@ -107,21 +107,28 @@ def download_youtube_video(message, url):
                             bot.send_document(
                                 message.chat.id,
                                 f,
-                                timeout=300,  # tunggu hingga 5 menit
-                                visible_file_name=os.path.basename(path)
+                                caption=caption,
+                                timeout=600,  # 10 menit
+                                disable_notification=False
                             )
                         else:
                             bot.send_video(
                                 message.chat.id,
                                 f,
-                                timeout=300,  # tunggu hingga 5 menit
+                                caption=caption,
+                                timeout=600,
                                 supports_streaming=True
                             )
                     return True
                 except Exception as e:
                     print(f"⚠️ Percobaan {attempt+1}/{max_retries} gagal: {e}")
-                    time.sleep(5)
+                    bot.send_message(
+                        message.chat.id,
+                        f"⚠️ Percobaan {attempt+1}/{max_retries} gagal, mencoba lagi..."
+                    )
+                    time.sleep(10)
             return False
+
 
         # 🔹 Coba kirim sebagai dokumen dulu (lebih aman)
         if send_with_retry(video_path, "🎥 Video berhasil diunduh!", as_document=True):
