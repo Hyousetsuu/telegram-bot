@@ -9,11 +9,17 @@ import google.generativeai as genai
 import time
 from telebot import apihelper
 from telebot import util
+import socket
 
 # ==============================
 # 🔐 Load environment variables
 # ==============================
 load_dotenv()
+try:
+    socket.create_connection(("api.telegram.org", 443), timeout=10)
+    print("✅ Koneksi ke Telegram API berhasil.")
+except Exception as e:
+    print(f"⚠️ Tidak bisa konek ke Telegram API: {e}")
 TOKEN = os.getenv("BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
@@ -49,42 +55,96 @@ def download_youtube_video(message, url):
     try:
         bot.send_message(message.chat.id, "⏳ Sedang memproses video YouTube...")
 
-        # Tambahkan timeout pada YouTube object
-        yt = YouTube(url, timeout=20)
-
-        # Ambil resolusi tertinggi yang paling stabil
-        stream = yt.streams.get_highest_resolution()
-
+        yt = YouTube(url)
+        stream = yt.streams.filter(progressive=True, file_extension='mp4', res='360p').first()
         if stream is None:
             raise Exception("Stream tidak tersedia atau video dibatasi!")
 
         filename = "youtube_video.mp4"
-
-        # ✅ Retry download 3x jika timeout
-        for attempt in range(3):
-            try:
-                video_path = stream.download(filename="youtube_video.mp4", timeout=60)
-                break
-            except Exception as e:
-                if attempt == 2:
-                    raise e
-                time.sleep(2)  # tunggu dulu sebelum mencoba lagi
+        bot.send_message(message.chat.id, "⬇️ Mulai download video...")
+        video_path = stream.download(filename=filename)
 
         size = os.path.getsize(video_path)
+        bot.send_message(message.chat.id, f"✅ Download selesai. Ukuran file: {size / 1024 / 1024:.2f} MB")
 
-        # Kirim sesuai batas file Telegram
-        if size > 50 * 1024 * 1024:
-            bot.send_message(message.chat.id, "📦 File besar, mengirim sebagai dokumen...")
-            bot.send_document(message.chat.id, open(video_path, "rb"))
+        # ======= Jika file >45 MB, kompres ==========
+        if size > 45 * 1024 * 1024:
+            bot.send_message(message.chat.id, "📦 File besar terdeteksi, mencoba kompres ke 480p...")
+            try:
+                from moviepy.editor import VideoFileClip
+                clip = VideoFileClip(video_path)
+                compressed_path = "compressed_video.mp4"
+                clip_resized = clip.resize(height=480)
+                clip_resized.write_videofile(
+                    compressed_path,
+                    codec="libx264",
+                    audio_codec="aac",
+                    temp_audiofile="temp-audio.m4a",
+                    remove_temp=True,
+                    threads=4,
+                    preset="ultrafast"
+                )
+                clip.close()
+                os.remove(video_path)
+                video_path = compressed_path
+                size = os.path.getsize(video_path)
+                bot.send_message(message.chat.id, f"✅ Kompres selesai. Ukuran baru: {size / 1024 / 1024:.2f} MB")
+            except Exception as e:
+                bot.send_message(message.chat.id, f"⚠️ Gagal kompres video: {e}")
+
+        # ========== Coba kirim file ke Telegram (lebih stabil) ==========
+        bot.send_message(message.chat.id, "🎬 Mengirim video ke Telegram... (harap tunggu, bisa memakan waktu beberapa menit)")
+
+        time.sleep(2)  # beri waktu agar file tidak terkunci
+
+        def send_with_retry(path, caption, as_document=False):
+            """Mengirim file dengan retry otomatis"""
+            max_retries = 5
+            for attempt in range(max_retries):
+                try:
+                    with open(path, "rb") as f:
+                        if as_document:
+                            bot.send_document(
+                                message.chat.id,
+                                f,
+                                timeout=300,  # tunggu hingga 5 menit
+                                visible_file_name=os.path.basename(path)
+                            )
+                        else:
+                            bot.send_video(
+                                message.chat.id,
+                                f,
+                                timeout=300,  # tunggu hingga 5 menit
+                                supports_streaming=True
+                            )
+                    return True
+                except Exception as e:
+                    print(f"⚠️ Percobaan {attempt+1}/{max_retries} gagal: {e}")
+                    time.sleep(5)
+            return False
+
+        # 🔹 Coba kirim sebagai dokumen dulu (lebih aman)
+        if send_with_retry(video_path, "🎥 Video berhasil diunduh!", as_document=True):
+            bot.send_message(message.chat.id, "✅ Video berhasil dikirim sebagai dokumen!")
         else:
-            bot.send_video(message.chat.id, open(video_path, "rb"))
+            bot.send_message(message.chat.id, "⚠️ Gagal kirim sebagai dokumen, mencoba kirim sebagai video...")
+            if send_with_retry(video_path, "🎥 Video berhasil diunduh!", as_document=False):
+                bot.send_message(message.chat.id, "✅ Video berhasil dikirim sebagai video!")
+            else:
+                bot.send_message(message.chat.id, "❌ Gagal mengirim video setelah beberapa kali percobaan.")
 
-        os.remove(video_path)
 
     except Exception as e:
-        bot.send_message(message.chat.id, f"⚠️ Gagal download YouTube.\nError: {e}")
+        bot.send_message(message.chat.id, f"❌ Terjadi error di download_youtube_video:\n{e}")
 
-
+    finally:
+        # bersihkan file lokal
+        for file in ["youtube_video.mp4", "compressed_video.mp4", "temp-audio.m4a"]:
+            if os.path.exists(file):
+                try:
+                    os.remove(file)
+                except:
+                    pass
 
 def download_tiktok_video(message, url):
     try:
@@ -135,8 +195,7 @@ def download_instagram_video(message, url):
 @bot.message_handler(func=lambda msg: True)
 def handle_message(message):
     text = message.text.strip()
-    
-    # Jika pesan adalah link video → JANGAN pakai AI
+
     platform = detect_platform(text)
     if platform == "youtube":
         return download_youtube_video(message, text)
@@ -145,7 +204,6 @@ def handle_message(message):
     elif platform == "instagram":
         return download_instagram_video(message, text)
 
-    # Jika user minta download tapi belum kasih link
     keywords = ["download", "unduh", "save video", "ambil video"]
     if any(keyword in text.lower() for keyword in keywords):
         return bot.reply_to(
@@ -154,7 +212,6 @@ def handle_message(message):
             "YouTube, TikTok & Instagram bisa 👌"
         )
 
-    # Jika bukan link dan bukan permintaan download → pakai AI
     try:
         response = model.generate_content(text)
         bot.reply_to(message, response.text)
@@ -162,17 +219,21 @@ def handle_message(message):
         bot.reply_to(message, f"🤖 AI error: {e}")
 
 
-
 # ==============================
-# 🚀 Start bot
+# 🚀 Start bot (Auto Reconnect)
 # ==============================
-print("🤖 Bot sedang berjalan...")
+if __name__ == "__main__":
+    print("🤖 Bot sedang berjalan...")
 
-while True:
-    try:
-        bot.infinity_polling(timeout=20, long_polling_timeout=10, restart_on_change=True)
-    except Exception as e:
-        # Jangan spam error, cukup logging singkat
-        print("⚠️ Koneksi terputus, mencoba lagi...")
-        time.sleep(5)
+    while True:
+        try:
+            bot.infinity_polling(timeout=60, long_polling_timeout=60)
+        except requests.exceptions.ConnectionError as e:
+            print(f"⚠️ Koneksi ke Telegram terputus: {e}")
+            time.sleep(10)  # tunggu 10 detik sebelum reconnect
+            continue
+        except Exception as e:
+            print(f"⚠️ Error umum di polling: {e}")
+            time.sleep(5)
+            continue
 
