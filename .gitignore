@@ -1,3 +1,5 @@
+.handler-saves
+
 .env
 .venv/
 
@@ -5,3 +7,5 @@ __pycache__/
 *.pyc
 *.pyo
 *.log
+
+test.py
