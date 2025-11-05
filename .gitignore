@@ -1,7 +1,12 @@
+.handler-saves
+
 .env
 .venv
 test.py
 
 __pycache__/
-*.mp4
-*.mp3
+*.pyc
+*.pyo
+*.log
+
+test.py
