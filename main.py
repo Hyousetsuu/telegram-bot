@@ -156,101 +156,183 @@ def download_youtube_video(message, url):
 # ==============================
 # 🎬 TikTok Downloader (lebih stabil)
 # ==============================
-def download_tiktok_video(message, url):
+def download_tiktok_media(message, url):
     try:
-        bot.send_message(message.chat.id, "🎬 Mengambil video TikTok...")
+        bot.send_message(message.chat.id, "🎬 Mengambil postingan TikTok...")
 
-        filename = "tiktok_video.mp4"
-        success = False
+        # download with resume
+        def download_with_resume(url, final_path, temp_path, min_valid_size=20000, stream_timeout=200, max_attempts=5):
+            if os.path.exists(final_path) and os.path.getsize(final_path) >= min_valid_size:
+                return True
 
-        # 🔁 Coba download video maksimal 3 kali
-        for attempt in range(3):
-            try:
-                resp = requests.get("https://www.tikwm.com/api/", params={"url": url}, timeout=15)
-                data = resp.json()
-                video_url = data.get("data", {}).get("play")
-                if not video_url:
-                    raise Exception("Link video tidak ditemukan.")
-
-                # Download video dengan stream 
-                with requests.get(video_url, stream=True, timeout=120) as r:
-                    r.raise_for_status()
-                    with open(filename, "wb") as f:
-                        for chunk in r.iter_content(chunk_size=8192):
-                            if chunk:
-                                f.write(chunk)
-
-                success = True
-                break  # keluar dari loop kalau berhasil download
-
-            except Exception as e:
-                print(f"⚠️ Percobaan {attempt+1}/3 gagal download: {e}")
-                bot.send_message(message.chat.id, f"⚠️ Percobaan {attempt+1}/3 gagal download, mencoba lagi...")
-                time.sleep(5)
-
-        if not success:
-            bot.send_message(message.chat.id, "❌ Gagal mengunduh video TikTok setelah 3 percobaan.")
-            return
-
-        # 🔍 Cek ukuran file
-        size = os.path.getsize(filename)
-        bot.send_message(message.chat.id, f"✅ Download selesai. Ukuran file: {size / 1024 / 1024:.2f} MB")
-
-        # ========================
-        # 🔁 Kirim ke Telegram (retry upload)
-        # ========================
-        def send_with_retry(path, caption, as_document=False):
-            """Mengirim file ke Telegram dengan retry otomatis"""
-            max_retries = 3
-            retry_delay = 15  # jeda antar percobaan dalam detik
-            upload_timeout = 900  # waktu maksimum upload 15 menit
-
-            for attempt in range(max_retries):
+            for attempt in range(1, max_attempts + 1):
                 try:
-                    with open(path, "rb") as f:
-                        if as_document:
-                            bot.send_document(
-                                message.chat.id,
-                                f,
-                                caption=caption,
-                                timeout=upload_timeout
-                            )
-                        else:
-                            bot.send_video(
-                                message.chat.id,
-                                f,
-                                caption=caption,
-                                timeout=upload_timeout,
-                                supports_streaming=True
-                            )
-                    return True
+                    downloaded = os.path.getsize(temp_path) if os.path.exists(temp_path) else 0
+                    headers = {"Range": f"bytes={downloaded}-"} if downloaded > 0 else {}
+
+                    with requests.get(url, headers=headers, stream=True, timeout=stream_timeout) as r:
+                        if downloaded > 0 and r.status_code != 206:
+                            try: os.remove(temp_path)
+                            except: pass
+                            downloaded = 0
+                            r = requests.get(url, stream=True, timeout=stream_timeout)
+
+                        r.raise_for_status()
+                        mode = "ab" if downloaded else "wb"
+                        with open(temp_path, mode) as f:
+                            for chunk in r.iter_content(chunk_size=40960):
+                                if chunk:
+                                    f.write(chunk)
+
+                    if os.path.exists(temp_path) and os.path.getsize(temp_path) >= min_valid_size:
+                        if os.path.exists(final_path):
+                            os.remove(final_path)
+                        os.replace(temp_path, final_path)
+                        return True
+
+                    raise Exception("File incomplete")
+
                 except Exception as e:
-                    print(f"⚠️ Percobaan {attempt+1}/{max_retries} gagal upload: {e}")
-                    bot.send_message(
-                        message.chat.id,
-                        f"⚠️ Upload percobaan {attempt+1}/{max_retries} gagal (coba lagi {retry_delay}s)..."
-                    )
-                    time.sleep(retry_delay)
+                    print(f"download_with_resume attempt {attempt}/{max_attempts} failed: {e}")
+                    time.sleep(3)
+
             return False
 
-        bot.send_message(message.chat.id, "🎬 Mengirim video ke Telegram... (harap tunggu beberapa menit)")
+        def send_media_group_safe(chat_id, paths):
+            batch_size = 5
+            delay_after_batch = 10
 
-        # Jika file >45MB → kirim sebagai dokumen
-        as_doc = size > 45 * 1024 * 1024
-        if send_with_retry(filename, "🎥 Video TikTok berhasil diunduh!", as_document=as_doc):
-            bot.send_message(message.chat.id, "✅ Video berhasil dikirim!")
+            index = 0
+            while index < len(paths):
+                batch = paths[index:index + batch_size]
+
+                for p in batch:
+                    if (not os.path.exists(p)) or (os.path.getsize(p) < 20000):
+                        print(f"Skip corrupt: {p}")
+                        continue
+
+                    success = False
+                    for attempt in range(6):  # ✅ retry lebih banyak
+                        try:
+                            with open(p, "rb") as f:
+                                bot.send_photo(chat_id, f, timeout=180)  # ✅ timeout besar
+                            success = True
+                            break
+                        except Exception as e:
+                            print(f"send_photo failed ({attempt+1}/6): {e}")
+                            time.sleep(4)
+
+                    if success:
+                        try: os.remove(p)  # ✅ Auto delete setelah terkirim
+                        except: pass
+                    else:
+                        bot.send_message(chat_id, f"⚠️ Gagal kirim: {p}")
+
+                index += batch_size
+                if index < len(paths):
+                    bot.send_message(chat_id, "⏳ Tunggu 10 detik sebelum lanjut...")
+                    time.sleep(delay_after_batch)
+
+        # API TikWM
+        resp = requests.get("https://www.tikwm.com/api/", params={"url": url}, timeout=35)
+        post_data = resp.json().get("data", {})
+
+        # ✅ IMAGE MODE (FULL DOWNLOAD FIRST)
+        images = post_data.get("images") or []
+        if post_data.get("type") == "image" or images:
+            img_urls = [img["url"] if isinstance(img, dict) else img for img in images]
+            total = len(img_urls)
+            bot.send_message(message.chat.id, f"🖼 Menemukan {total} gambar...")
+
+            downloaded = []
+            failed = 0
+
+            # ✅ Download ALL first
+            for i, u in enumerate(img_urls, start=1):
+                fn = f"tiktok_pic_{i}.jpg"
+                tp = fn + ".part"
+
+                msg = bot.send_message(message.chat.id, f"⬇️ Download {i}/{total}...")
+                ok = download_with_resume(u, fn, tp, min_valid_size=20000, max_attempts=10)
+
+                try:
+                    bot.delete_message(message.chat.id, msg.message_id)
+                except:
+                    pass
+
+                if ok and os.path.exists(fn) and os.path.getsize(fn) > 20000:
+                    downloaded.append(fn)
+                else:
+                    failed += 1
+                    if os.path.exists(fn): os.remove(fn)
+                    if os.path.exists(tp): os.remove(tp)
+
+            if failed > 0:
+                bot.send_message(message.chat.id, f"⚠️ {failed} gambar gagal di-download")
+
+            if not downloaded:
+                bot.send_message(message.chat.id, "❌ Tidak ada gambar valid untuk dikirim")
+                return
+
+            # ✅ SEND AFTER ALL DONE
+            bot.send_message(message.chat.id, f"📤 Upload {len(downloaded)} gambar ke Telegram...")
+
+            sent = 0
+            for i in range(0, len(downloaded), 10):
+                batch = downloaded[i:i+10]
+                send_media_group_safe(message.chat.id, batch)
+                sent += len(batch)
+                bot.send_message(message.chat.id, f"✅ {sent}/{len(downloaded)} selesai")
+
+            bot.send_message(message.chat.id, "🎯 Semua gambar berhasil dikirim ✅")
+            return
+
+        # ✅ VIDEO MODE
+        video_url = post_data.get("play")
+        if not video_url:
+            raise Exception("URL video tidak ditemukan.")
+
+        fn = "tiktok_video.mp4"
+        tp = fn + ".part"
+        bot.send_message(message.chat.id, "🎥 Mendownload video...")
+
+        if not download_with_resume(video_url, fn, tp, min_valid_size=100000):
+            raise Exception("Gagal download video!")
+
+        size = os.path.getsize(fn)
+
+        if size > 45*1024*1024:
+            send_func = bot.send_document
+            caption = "📦 Video TikTok"
         else:
-            bot.send_message(message.chat.id, "❌ Gagal mengirim video setelah beberapa percobaan.")
+            send_func = bot.send_video
+            caption = "🎥 Video TikTok"
+
+        success = False
+        for attempt in range(6):  # ✅ retry upload
+            try:
+                with open(fn, "rb") as f:
+                    send_func(message.chat.id, f, caption=caption, timeout=200)
+                success = True
+                break
+            except Exception as e:
+                print(f"send_video attempt {attempt+1} failed: {e}")
+                time.sleep(6)
+
+        if not success:
+            raise Exception("Upload video gagal setelah 6 percobaan!")
+
+        bot.send_message(message.chat.id, "✅ Video berhasil dikirim!")
 
     except Exception as e:
-        bot.send_message(message.chat.id, f"⚠️ Gagal download TikTok.\nError: {e}")
+        print("download_tiktok_media error:", e)
+        bot.send_message(message.chat.id, f"❌ Error: {e}")
 
     finally:
-        if os.path.exists(filename):
-            try:
-                os.remove(filename)
-            except:
-                pass
+        for f in os.listdir():
+            if f.endswith(".part") or f.startswith("tiktok_pic_") or f == "tiktok_video.mp4":
+                try: os.remove(f)
+                except: pass
 
 # ==============================
 # 📸 Instagram Downloader (pakai alternatif)
@@ -287,7 +369,7 @@ def handle_message(message):
     if platform == "youtube":
         return download_youtube_video(message, text)
     elif platform == "tiktok":
-        return download_tiktok_video(message, text)
+        return download_tiktok_media(message, text)
     elif platform == "instagram":
         return download_instagram_video(message, text)
 
