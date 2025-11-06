@@ -10,6 +10,10 @@ if not TOKEN:
     raise Exception("BOT_TOKEN tidak ditemukan dalam .env!")
 
 bot = telebot.TeleBot(TOKEN)
+apihelper.SESSION_RETRY = True
+apihelper.RETRIES = 5
+genai.configure(api_key=GEMINI_API_KEY)
+model = genai.GenerativeModel(model_name="models/gemini-2.5-flash")
 
 register_handlers(bot)  # ✅ Register handler auto-link
 

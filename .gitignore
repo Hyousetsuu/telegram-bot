@@ -1,7 +1,8 @@
 .handler-saves
 
 .env
-.venv/
+.venv
+test.py
 
 __pycache__/
 *.pyc
