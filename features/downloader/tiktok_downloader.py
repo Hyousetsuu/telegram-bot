@@ -177,6 +177,7 @@ class TikTokDownloader:
 
         with open(fname, "rb") as f:
             self.bot.send_video(message.chat.id, f, caption="🎥 Video TikTok")
+        return True 
 
     # ===== AUDIO MODE (FIXED) =====
         # ===== AUDIO MODE (BENAR) =====
