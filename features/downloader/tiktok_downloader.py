@@ -7,164 +7,209 @@ class TikTokDownloader:
     def __init__(self, bot):
         self.bot = bot
 
-    def download(self, message, url):
-        return self.download_tiktok_media(message, url)
+    # ===== ENTRY POINT =====
+    def download(self, message, url, mode="auto"):
+        return self.download_tiktok_media(message, url, mode)
 
-    def download_tiktok_media(self, message, url):
+    def download_tiktok_media(self, message, url, mode="auto"):
         try:
-            self.bot.send_message(message.chat.id, "🎬 Mengambil postingan TikTok...")
+            self.bot.send_message(message.chat.id, "🎬 Mengambil postingan TikTok... 🤖")
 
             post_data = self._get_tiktok_data(url)
 
-            if post_data.get("type") == "image" or post_data.get("images"):
+            if not isinstance(post_data, dict) or not post_data:
+                self.bot.send_message(message.chat.id, "❌ Gagal membaca data TikTok. Coba ulangi.")
+                return False
+
+            # === MODE AUDIO ===
+            if mode == "audio" or mode == "mp3":
+                return self._handle_audio_mode(message, post_data)
+
+            # === MODE GAMBAR (SLIDE) ===
+            if post_data.get("images"):
                 return self._handle_image_mode(message, post_data)
 
+            # === MODE VIDEO ===
             return self._handle_video_mode(message, post_data)
 
         except Exception as e:
             print("download_tiktok_media error:", e)
             self.bot.send_message(message.chat.id, f"❌ Error: {e}")
-            return False  # ❌ Gagal
+            return False
+
         finally:
             self._cleanup_tempfiles()
 
-    # 🔥 TikTok API fetch
+    # ===== API FETCH =====
     def _get_tiktok_data(self, url):
-        resp = requests.get("https://www.tikwm.com/api/", params={"url": url}, timeout=35)
-        return resp.json().get("data", {})
+        apis = [
+            ("https://www.tikwm.com/api/", "data"),
+            ("https://api.tikmate.app/api/lookup", "videoUrl"),
+            ("https://www.tikcdn.io/api/v1/tiktok/video", "videoUrl")
+        ]
 
-    # ✅ Resume Download Utility
+        for api, keycheck in apis:
+            try:
+                resp = requests.get(api, params={"url": url}, timeout=15)
+
+                # Pastikan respons JSON dan bukan string/HTML
+                try:
+                    data = resp.json()
+                except:
+                    continue  # jika bukan JSON → skip API ini
+
+                # TikWM
+                if isinstance(data, dict) and isinstance(data.get("data"), dict):
+                    return data["data"]
+
+                # Fallback API (Tikmate / Tikcdn)
+                if isinstance(data, dict) and keycheck in str(data):
+                    normalized = self._normalize_data(data)
+                    if isinstance(normalized, dict):   # pastikan hasil dict
+                        return normalized
+
+            except Exception as e:
+                print("Fallback error", api, e)
+                continue
+
+        return {}  # jika semuanya gagal
+
+
+    # ===== NORMALIZE FALLBACK =====
+    def _normalize_data(self, data):
+    # Pastikan input dict
+        if not isinstance(data, dict):
+            return {}
+
+        # Ambil URL video
+        play = data.get("videoUrl") or data.get("play") or ""
+
+        # Ambil URL audio
+        music = data.get("musicUrl") or data.get("music") or ""
+
+        # Pastikan music selalu dictionary
+        if isinstance(music, str):
+            music = {"play_url": music}
+        elif isinstance(music, dict):
+            music = {"play_url": music.get("play_url") or music.get("url") or ""}
+
+        images = data.get("imageUrls") or data.get("images") or []
+
+        # Normalisasi list gambar
+        clean_images = []
+        for img in images:
+            if isinstance(img, dict):
+                clean_images.append(img.get("url"))
+            else:
+                clean_images.append(img)
+
+        return {
+            "play": play,
+            "images": clean_images,
+            "music": music
+        }
+
+
+
+    # ===== DOWNLOAD RESUME SUPPORT =====
     def _download_with_resume(self, url, final_path, temp_path,
-                              min_valid_size=20000, stream_timeout=200, max_attempts=6):
+                              min_valid_size=20000, timeout=200, attempts=5):
 
         if os.path.exists(final_path) and os.path.getsize(final_path) >= min_valid_size:
             return True
 
-        for attempt in range(1, max_attempts + 1):
+        for _ in range(attempts):
             try:
                 downloaded = os.path.getsize(temp_path) if os.path.exists(temp_path) else 0
-                headers = {"Range": f"bytes={downloaded}-"} if downloaded > 0 else {}
+                headers = {"Range": f"bytes={downloaded}-"} if downloaded else {}
 
-                with requests.get(url, headers=headers, stream=True, timeout=stream_timeout) as r:
-                    if downloaded > 0 and r.status_code != 206:
-                        os.remove(temp_path)
-                        downloaded = 0
-                        r = requests.get(url, stream=True, timeout=stream_timeout)
-
+                with requests.get(url, headers=headers, stream=True, timeout=timeout) as r:
                     r.raise_for_status()
                     mode = "ab" if downloaded else "wb"
+
                     with open(temp_path, mode) as f:
                         for chunk in r.iter_content(chunk_size=40960):
                             if chunk:
                                 f.write(chunk)
 
                 if os.path.exists(temp_path) and os.path.getsize(temp_path) >= min_valid_size:
-                    if os.path.exists(final_path):
-                        os.remove(final_path)
                     os.replace(temp_path, final_path)
                     return True
 
-            except Exception as e:
-                print(f"download_with_resume attempt {attempt}/{max_attempts} failed: {e}")
-                time.sleep(3)
+            except:
+                time.sleep(2)
 
         return False
 
-    # ✅ Send multiple images safely with retry
-    def _send_media_group_safe(self, chat_id, paths):
-        batch_size = 5
-        delay_after_batch = 10
-
-        for i in range(0, len(paths), batch_size):
-            batch = paths[i:i + batch_size]
-
-            for p in batch:
-                if not os.path.exists(p) or os.path.getsize(p) < 20000:
-                    continue
-
-                for attempt in range(6):
-                    try:
-                        with open(p, "rb") as f:
-                            self.bot.send_photo(chat_id, f, timeout=180)
-                        os.remove(p)
-                        break
-                    except Exception as e:
-                        print(f"send_photo failed attempt {attempt+1}: {e}")
-                        time.sleep(4)
-
-            if i + batch_size < len(paths):
-                self.bot.send_message(chat_id, "⏳ Tunggu 10 detik sebelum lanjut...")
-                time.sleep(delay_after_batch)
-
-    # ✅ Image Mode Handler
+    # ===== IMAGE MODE =====
     def _handle_image_mode(self, message, post_data):
-        images = post_data.get("images") or []
-        img_urls = [img["url"] if isinstance(img, dict) else img for img in images]
+        image_urls = [i["url"] if isinstance(i, dict) else i for i in post_data.get("images", [])]
 
-        self.bot.send_message(message.chat.id, f"🖼 Menemukan {len(img_urls)} gambar...")
+        if not image_urls:
+            raise Exception("Slide gambar tidak ditemukan.")
 
-        downloaded = []
+        self.bot.send_message(message.chat.id, f"🖼 Menemukan {len(image_urls)} gambar...")
 
-        for i, u in enumerate(img_urls, start=1):
-            fn = f"tiktok_pic_{i}.jpg"
-            tp = fn + ".part"
+        for index, url in enumerate(image_urls, start=1):
+            fname = f"tiktok_img_{index}.jpg"
+            part = fname + ".part"
 
-            msg = self.bot.send_message(message.chat.id, f"⬇️ Download {i}/{len(img_urls)}...")
-            ok = self._download_with_resume(u, fn, tp)
+            if self._download_with_resume(url, fname, part):
+                with open(fname, "rb") as f:
+                    self.bot.send_photo(message.chat.id, f)
+                os.remove(fname)
 
-            try:
-                self.bot.delete_message(message.chat.id, msg.message_id)
-            except:
-                pass
-
-            if ok:
-                downloaded.append(fn)
-
-        if not downloaded:
-            self.bot.send_message(message.chat.id, "❌ Tidak ada gambar valid untuk dikirim")
-            return False  # ❌ Gagal
-
-        self.bot.send_message(message.chat.id, f"📤 Upload {len(downloaded)} gambar ke Telegram...")
-        self._send_media_group_safe(message.chat.id, downloaded)
         self.bot.send_message(message.chat.id, "✅ Semua gambar berhasil dikirim!")
-        return True  # ✅ Berhasil
 
-    # ✅ Video Mode Handler
+    # ===== VIDEO MODE =====
     def _handle_video_mode(self, message, post_data):
         video_url = post_data.get("play")
         if not video_url:
             raise Exception("URL video tidak ditemukan.")
 
-        fn = "tiktok_video.mp4"
-        tp = fn + ".part"
+        fname = "tiktok_video.mp4"
+        part = fname + ".part"
 
-        self.bot.send_message(message.chat.id, "🎥 Mendownload video...")
+        self.bot.send_message(message.chat.id, "🎥 Mengunduh video...")
 
-        if not self._download_with_resume(video_url, fn, tp, min_valid_size=150000):
+        if not self._download_with_resume(video_url, fname, part, min_valid_size=120000):
             raise Exception("Gagal download video!")
 
-        size = os.path.getsize(fn)
-        send_func = self.bot.send_document if size > 45*1024*1024 else self.bot.send_video
-        caption = "📦 Video TikTok" if size > 45*1024*1024 else "🎥 Video TikTok"
+        with open(fname, "rb") as f:
+            self.bot.send_video(message.chat.id, f, caption="🎥 Video TikTok")
 
-        for attempt in range(6):
-            try:
-                with open(fn, "rb") as f:
-                    send_func(message.chat.id, f, caption=caption, timeout=200)
-                self.bot.send_message(message.chat.id, "✅ Video berhasil dikirim!")
-                return True  # ✅ Berhasil
-            except Exception as e:
-                print(f"send_video attempt {attempt+1} failed: {e}")
-                time.sleep(6)
+    # ===== AUDIO MODE (FIXED) =====
+        # ===== AUDIO MODE (BENAR) =====
+    def _handle_audio_mode(self, message, post_data):
+        music = post_data.get("music")
 
-        self.bot.send_message(message.chat.id, "❌ Upload video gagal setelah 6 percobaan!")
-        return False  # ❌ Gagal
+        # Normalisasi jika music masih string
+        if isinstance(music, str):
+            music = {"play_url": music}
+        elif isinstance(music, dict):
+            music = {"play_url": music.get("play_url") or music.get("url") or music.get("music")}
 
-    # ✅ Cleanup Temp
+        audio_url = music.get("play_url") if music else None
+
+        if not audio_url:
+            raise Exception("URL audio tidak ditemukan.")
+
+        fname = "tiktok_audio.mp3"
+        part = fname + ".part"
+
+        self.bot.send_message(message.chat.id, "🎧 Mengunduh audio MP3...")
+
+        if not self._download_with_resume(audio_url, fname, part, min_valid_size=15000):
+            raise Exception("Gagal download audio!")
+
+        with open(fname, "rb") as f:
+            self.bot.send_audio(message.chat.id, f, caption="🎶 Audio TikTok (MP3)")
+
+        self.bot.send_message(message.chat.id, "✅ MP3 berhasil dikirim!")
+
+    # ===== CLEANER =====
     def _cleanup_tempfiles(self):
         for f in os.listdir():
-            if f.endswith(".part") or f.startswith("tiktok_pic_") or f == "tiktok_video.mp4":
-                try:
-                    os.remove(f)
-                except:
-                    pass
+            if f.endswith(".part") or f.startswith("tiktok_"):
+                try: os.remove(f)
+                except: pass

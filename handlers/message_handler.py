@@ -27,51 +27,56 @@ def register_handlers(bot):
     ig = InstagramDownloader(bot)
     ai = GeminiAssistant(bot)
 
-    # ✅ Pesan fallback bila gagal download
+    # ✅ Fallback pesan ketika gagal
     def send_fail_message(message, platform):
         fail_messages = {
-            "youtube": "Maaf, saya tidak bisa mendownload video YouTube ini saat ini. "
-                       "Coba gunakan website seperti y2mate.is atau keepvid.app ya!",
-            "tiktok": "Maaf, saya tidak bisa mendownload video TikTok ini. "
-                      "Kamu bisa coba di snaptik.app atau musicaldown.com!",
-            "instagram": "Maaf, saya tidak bisa mendownload video Instagram ini. "
-                         "Gunakan snapinsta.app atau instavideo.net ya!"
+            "youtube": "⚠️ Tidak bisa mendownload video YouTube ini.",
+            "tiktok": "⚠️ Tidak bisa mendownload video TikTok ini.",
+            "instagram": "⚠️ Tidak bisa mendownload video Instagram ini."
         }
-        bot.reply_to(message, fail_messages.get(platform, "Gagal memproses link ini."))
+        return bot.reply_to(message, fail_messages.get(platform, "⚠️ Gagal memproses link ini."))
 
+    # ✅ Handler utama
     @bot.message_handler(func=lambda msg: True)
     def handler(message):
-        text = message.text.strip()
+        text = message.text.strip().lower()
 
-        url = extract_url(text)
+        # ==================================================
+        # ✅ COMMAND MP3 → Download AUDIO TikTok
+        # ==================================================
+        if text.startswith("/mp3") or text.startswith("mp3 "):
+            url = extract_url(message.text)
+            if not url:
+                return bot.send_message(message.chat.id, "🎧 Format yang benar:\n/mp3 <link TikTok>")
+            return tt.download(message, url, mode="audio")
+
+        # ==================================================
+        # ✅ Jika tidak ada link → balas sebagai Chat AI
+        # ==================================================
+        url = extract_url(message.text)
         if not url:
-            # Jika user menyebut salah satu platform tanpa URL
-            if any(p in text.lower() for p in ["instagram", "ig"]):
-                return bot.send_message(message.chat.id, "📌 Kirim link Instagram videonya ya!")
-            if any(p in text.lower() for p in ["tiktok", "tt"]):
-                return bot.send_message(message.chat.id, "📌 Kirim link TikTok videonya ya!")
-            if any(p in text.lower() for p in ["youtube", "yt"]):
-                return bot.send_message(message.chat.id, "📌 Kirim link YouTube videonya ya!")
-
-            # Kalau bukan permintaan download
             return ai.reply(message)
 
-        if not url:
-            return ai.reply(message)
-
+        # ==================================================
+        # ✅ Tentukan platform berdasarkan link
+        # ==================================================
         platform = detect_platform(url)
 
+        # ✅ YouTube → Video
         if platform == "youtube":
-            if not yt.download(message, url):  # jika downloader return False
+            if not yt.download(message, url):
                 return send_fail_message(message, platform)
 
+        # ✅ TikTok → Default = Video
         elif platform == "tiktok":
-            if not tt.download(message, url):
+            if not tt.download(message, url, mode="video"):
                 return send_fail_message(message, platform)
 
+        # ✅ Instagram → Video/Reel
         elif platform == "instagram":
             if not ig.download(message, url):
                 return send_fail_message(message, platform)
 
+        # ✅ Jika bukan link platform dikenal → AI jawab
         else:
             return ai.reply(message)

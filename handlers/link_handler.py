@@ -30,3 +30,4 @@ class LinkHandler:
             return self.ig.download, "instagram", url
 
         return None, None, url
+    
