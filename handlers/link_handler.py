@@ -1,7 +1,7 @@
 import re
-from services.youtube_downloader import YouTubeDownloader
-from services.tiktok_downloader import TikTokDownloader
-from services.instagram_downloader import InstagramDownloader
+from features.downloader.youtube_downloader import YouTubeDownloader
+from features.downloader.tiktok_downloader import TikTokDownloader
+from features.downloader.instagram_downloader import InstagramDownloader
 
 
 class LinkHandler:
