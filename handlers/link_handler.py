@@ -1,7 +1,8 @@
 import re
-from features.downloader.youtube_downloader import YouTubeDownloader
-from features.downloader.tiktok_downloader import TikTokDownloader
-from features.downloader.instagram_downloader import InstagramDownloader
+from services.youtube_downloader import YouTubeDownloader
+from services.tiktok_downloader import TikTokDownloader
+from services.instagram_downloader import InstagramDownloader
+
 
 class LinkHandler:
     def __init__(self, bot):
