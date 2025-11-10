@@ -1,15 +1,16 @@
+import re
+from telebot import types
 from features.downloader.youtube_downloader import YouTubeDownloader
 from features.downloader.tiktok_downloader import TikTokDownloader
 from features.downloader.instagram_downloader import InstagramDownloader
 from features.ai.gemini_assistant import GeminiAssistant
-from telebot import types
-import re
+from features.tools.compressor import Compressor
 
-# 🔹 Simpan link TikTok sementara
+# 🔹 Simpan link sementara (chat_id -> url)
 pending_links = {}
 
 # ------------------------------------------------------------
-# 🔍 Deteksi URL dan Platform
+# 🔍 Helper Functions
 # ------------------------------------------------------------
 def extract_url(text: str):
     match = re.search(r"(https?://[^\s]+)", text)
@@ -17,41 +18,60 @@ def extract_url(text: str):
 
 def detect_platform(url: str):
     url = url.lower()
-    if any(x in url for x in ["youtube.com", "youtu.be"]):
-        return "youtube"
-    elif any(x in url for x in ["tiktok.com", "vm.tiktok.com", "vt.tiktok.com"]):
-        return "tiktok"
-    elif any(x in url for x in ["instagram.com", "instagr.am"]):
-        return "instagram"
+    if any(x in url for x in ["youtube.com", "youtu.be"]): return "youtube"
+    elif any(x in url for x in ["tiktok.com", "vm.tiktok.com", "vt.tiktok.com"]): return "tiktok"
+    elif any(x in url for x in ["instagram.com", "instagr.am"]): return "instagram"
     return None
 
 # ------------------------------------------------------------
-# 🚀 Register semua handler
+# 🚀 Register All Handlers
 # ------------------------------------------------------------
 def register_handlers(bot):
+    # Inisialisasi Fitur
     yt = YouTubeDownloader(bot)
     tt = TikTokDownloader(bot)
     ig = InstagramDownloader(bot)
     ai = GeminiAssistant(bot)
+    compressor = Compressor(bot) # <-- Inisialisasi Compressor
 
     # ========================================================
-    # 🎯 Handler utama pesan teks
+    # 🖼 Handler Khusus Gambar (Foto & Dokumen Gambar)
+    # ========================================================
+    @bot.message_handler(content_types=['photo', 'document'])
+    def handle_files(message):
+        is_valid = False
+        # Cek apakah Foto
+        if message.photo: is_valid = True
+        # Cek apakah Dokumen (Gambar atau PDF)
+        elif message.document:
+            mime = message.document.mime_type
+            if mime.startswith("image/") or mime == "application/pdf":
+                is_valid = True
+        
+        if is_valid:
+            compressor.offer_compression(message)
+            return # Stop agar tidak lanjut ke handler teks)
+
+    # ========================================================
+    # 🎯 Handler Utama Pesan Teks
     # ========================================================
     @bot.message_handler(func=lambda msg: True)
-    def handler(message):
+    def handler_text(message):
         text = message.text.strip()
         url = extract_url(text)
+
+        # Jika tidak ada URL, serahkan ke AI
         if not url:
             return ai.reply(message)
 
         platform = detect_platform(url)
 
-        # YouTube
+        # --- YOUTUBE ---
         if platform == "youtube":
-            yt.send_format_buttons(message, url)
-            return
+            pending_links[message.chat.id] = url
+            yt.send_format_buttons(message) # Tidak perlu kirim URL lagi
 
-        # TikTok
+        # --- TIKTOK ---
         elif platform == "tiktok":
             pending_links[message.chat.id] = url
             markup = types.InlineKeyboardMarkup()
@@ -60,19 +80,33 @@ def register_handlers(bot):
                 types.InlineKeyboardButton("🎵 Audio (MP3)", callback_data="tt_mp3"),
                 types.InlineKeyboardButton("🖼 Gambar", callback_data="tt_image")
             )
-            bot.send_message(
-                message.chat.id,
-                "🎬 Pilih format unduhan TikTok:",
-                reply_markup=markup
-            )
-            return
+            bot.send_message(message.chat.id, "🎬 Pilih format unduhan TikTok:", reply_markup=markup)
 
-        # Instagram
+        # --- INSTAGRAM ---
         elif platform == "instagram":
-            return ig.download(message, url)
+            ig.download(message, url)
 
+        # --- LINK LAIN (Fallback ke AI) ---
         else:
-            return ai.reply(message)
+            ai.reply(message)
+
+    # ========================================================
+    # 🗜 Callback Compressor
+    # ========================================================
+    @bot.callback_query_handler(func=lambda call: "img_" in call.data or "pdf_" in call.data)
+    def callback_compressor(call):
+        try:
+            if "img_" in call.data:
+                # Handle Gambar
+                quality = int(call.data.split("_")[1])
+                bot.answer_callback_query(call.id, "Mulai kompres gambar...")
+                compressor.process_image(call, quality)
+            elif "pdf_" in call.data:
+                # Handle PDF
+                bot.answer_callback_query(call.id, "Mulai kompres PDF...")
+                compressor.process_pdf(call)
+        except Exception as e:
+             print(f"Callback Error: {e}")
 
     # ========================================================
     # 🎥 Callback YouTube
@@ -80,12 +114,16 @@ def register_handlers(bot):
     @bot.callback_query_handler(func=lambda call: call.data.startswith("yt_"))
     def callback_youtube(call):
         try:
-            format_type, url = call.data.split("|", 1)
-            format_type = "mp4" if format_type == "yt_mp4" else "mp3"
+            url = pending_links.get(call.message.chat.id)
+            if not url:
+                bot.answer_callback_query(call.id, "❌ Link kadaluarsa. Kirim ulang.")
+                return
+
+            format_type = "mp4" if call.data == "yt_mp4" else "mp3"
             bot.answer_callback_query(call.id, f"🔽 Mengunduh {format_type.upper()}...")
             yt.download(call.message, url, format_type)
         except Exception as e:
-            bot.send_message(call.message.chat.id, f"❌ Terjadi error: {e}")
+            bot.send_message(call.message.chat.id, f"❌ Error YouTube: {e}")
 
     # ========================================================
     # 🎵 Callback TikTok
@@ -95,17 +133,12 @@ def register_handlers(bot):
         try:
             url = pending_links.get(call.message.chat.id)
             if not url:
-                bot.answer_callback_query(call.id, "❌ URL TikTok tidak ditemukan.")
+                bot.answer_callback_query(call.id, "❌ Link kadaluarsa.")
                 return
 
-            bot.answer_callback_query(call.id, "📥 Mengunduh dari TikTok...")
-
-            if call.data == "tt_video":
-                tt.download_video(call.message, url)
-            elif call.data == "tt_mp3":
-                tt.download_audio(call.message, url)
-            elif call.data == "tt_image":
-                tt.download_images(call.message, url)
-
+            bot.answer_callback_query(call.id, "📥 Memproses TikTok...")
+            if call.data == "tt_video": tt.download_video(call.message, url)
+            elif call.data == "tt_mp3": tt.download_audio(call.message, url)
+            elif call.data == "tt_image": tt.download_images(call.message, url)
         except Exception as e:
-            bot.send_message(call.message.chat.id, f"❌ Terjadi error: {e}")
+            bot.send_message(call.message.chat.id, f"❌ Error TikTok: {e}")
