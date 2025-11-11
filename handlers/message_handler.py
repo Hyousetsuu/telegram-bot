@@ -1,6 +1,9 @@
 from features.downloader.youtube_downloader import YouTubeDownloader
 from features.downloader.tiktok_downloader import TikTokDownloader
 from features.downloader.instagram_downloader import InstagramDownloader
+from features.downloader.file_converter import FileConverter
+from features.downloader.tts_converter import TextToSpeechConverter
+from features.downloader.qr_generator import QRCodeGenerator
 from features.ai.gemini_assistant import GeminiAssistant
 from telebot import types
 import re
@@ -32,18 +35,39 @@ def register_handlers(bot):
     yt = YouTubeDownloader(bot)
     tt = TikTokDownloader(bot)
     ig = InstagramDownloader(bot)
+    converter = FileConverter(bot)
+    tts = TextToSpeechConverter(bot)
+    qr = QRCodeGenerator(bot)
     ai = GeminiAssistant(bot)
 
     # ========================================================
-    # 🎯 Handler utama pesan teks
+    # 🎯 Handler utama pesan teks (Termasuk deteksi link dan command)
     # ========================================================
-    @bot.message_handler(func=lambda msg: True)
+    @bot.message_handler(func=lambda msg: True, content_types=['text'])
     def handler(message):
         text = message.text.strip()
         url = extract_url(text)
+        
+        # --- Pemeriksaan Command Konversi File ---
+        if text.startswith('/imgtopdf'):
+            return converter.img_to_pdf(message)
+        elif text.startswith('/pdftoimg'):
+            return converter.pdf_to_img(message)
+        
+        # --- Pemeriksaan Command Teks ke Suara ---
+        elif text.startswith('/tts'):
+            return tts.text_to_audio(message)
+            
+        # --- Pemeriksaan Command QR Code ---
+        elif text.startswith('/qr'):
+            return qr.generate_qr(message)
+        # ------------------------------------
+
         if not url:
+            # Jika bukan link dan bukan command konversi, kirim ke AI
             return ai.reply(message)
 
+        # Jika ada URL
         platform = detect_platform(url)
 
         # YouTube
@@ -72,7 +96,27 @@ def register_handlers(bot):
             return ig.download(message, url)
 
         else:
+            # Jika URL tidak dikenali (URL lain), kirim ke AI
             return ai.reply(message)
+
+    # ========================================================
+    # 📚 Handler untuk Perintah Konversi (Dipastikan terdeteksi)
+    # ========================================================
+    @bot.message_handler(commands=['imgtopdf'])
+    def handle_img_to_pdf_command(message):
+        return converter.img_to_pdf(message)
+
+    @bot.message_handler(commands=['pdftoimg'])
+    def handle_pdf_to_img_command(message):
+        return converter.pdf_to_img(message)
+
+    @bot.message_handler(commands=['tts'])
+    def handle_tts_command(message):
+        return tts.text_to_audio(message)
+
+    @bot.message_handler(commands=['qr'])
+    def handle_qr_command(message):
+        return qr.generate_qr(message)
 
     # ========================================================
     # 🎥 Callback YouTube
