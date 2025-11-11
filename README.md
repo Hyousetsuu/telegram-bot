@@ -53,7 +53,7 @@ Bot ini menggunakan *smart handler* — cukup kirim file, dan bot akan menawarka
 
 ### 1️⃣ Clone Repository
 ```bash
-git clone https://github.com/URL_REPOSITORY_ANDA.git
+git clone https://github.com/Hyousetsuu/telegram-bot
 cd telegram-bot
 2️⃣ Buat & Aktifkan Virtual Environment
 bash
