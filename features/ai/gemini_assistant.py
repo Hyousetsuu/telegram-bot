@@ -5,132 +5,74 @@ import google.generativeai as genai
 from datetime import datetime
 import pytz
 
+from features.services.weather_service import WeatherService
 
 class GeminiAssistant:
     def __init__(self, bot):
         self.bot = bot
+        self.weather_service = WeatherService()
+
         genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-        self.model = genai.GenerativeModel("models/gemini-2.5-flash")
+        
+        SYSTEM_PROMPT = """
+        Kamu adalah asisten bot Telegram yang cerdas dan ramah.
+        
+        FITUR CANGGIH YANG KAMU MILIKI:
+        1. DOWNLOADER: Bisa download dari Instagram, TikTok, dan YouTube (jika ada link).
+        2. FILE COMPRESSOR: Bisa memperkecil ukuran GAMBAR (JPG/PNG) dan file PDF.
+        3. INFO: Bisa cek cuaca terkini.
+        
+        PANDUAN MENJAWAB:
+        - Jika user minta download tanpa link -> Jawab: "Siap! Kirimkan linknya ya. 😉"
+        - Jika user tanya "bisa kompres apa aja?" -> Jawab: "Aku bisa kompres gambar (JPG/PNG) dan juga file PDF lho! Kirim aja filenya. 📂"
+        - JANGAN PERNAH bilang kamu tidak bisa melakukan hal-hal di atas.
+        """
 
-        # ambil API key dari .env
-        self.weather_key = os.getenv("OPENWEATHER_API_KEY")
-        self.news_key = os.getenv("NEWS_API_KEY")
+        self.model = genai.GenerativeModel(
+            model_name="models/gemini-2.5-flash",
+            system_instruction=SYSTEM_PROMPT
+        )
 
-    def _remove_formatting(self, text: str):
-        return re.sub(r"[*_`~]", "", text)
-
-    def _get_local_time(self):
+    def _get_local_time_str(self):
         tz = pytz.timezone("Asia/Jakarta")
-        now = datetime.now(tz)
-        return now.strftime("%A, %d %B %Y, %H:%M WIB")
+        return datetime.now(tz).strftime("%A, %d %B %Y, Jam %H:%M WIB")
 
-    def _get_weather(self, city="Jakarta"):
-        try:
-            url = (
-                f"http://api.openweathermap.org/data/2.5/weather?q={city}"
-                f"&appid={self.weather_key}&units=metric&lang=id"
-            )
-            r = requests.get(url, timeout=10)
-            data = r.json()
-
-            if data.get("cod") != 200:
-                return "Tidak dapat mengambil data cuaca saat ini."
-
-            weather = data["weather"][0]["description"].capitalize()
-            temp = data["main"]["temp"]
-            hum = data["main"]["humidity"]
-            wind = data["wind"]["speed"]
-
-            return (
-                f"🌤 Cuaca {city.title()} ({self._get_local_time()}):\n"
-                f"- Kondisi: {weather}\n"
-                f"- Suhu: {temp}°C\n"
-                f"- Kelembapan: {hum}%\n"
-                f"- Angin: {wind} m/s"
-            )
-        except Exception as e:
-            print("Weather error:", e)
-            return "Tidak dapat mengambil data cuaca saat ini."
-
-    def _get_news(self, country="id", count=3, topic=None):
-        try:
-            if topic:
-                url = (
-                    f"https://newsapi.org/v2/everything?q={topic}&language=id"
-                    f"&apiKey={self.news_key}&pageSize={count}"
-                )
-            else:
-                # default pakai keyword Indonesia supaya selalu ada
-                url = (
-                    f"https://newsapi.org/v2/everything?q=indonesia&language=id"
-                    f"&apiKey={self.news_key}&pageSize={count}"
-                )
-
-            r = requests.get(url, timeout=10)
-            data = r.json()
-
-            if data.get("status") != "ok":
-                return "Tidak dapat mengambil berita terkini saat ini."
-
-            articles = data.get("articles", [])[:count]
-            if not articles:
-                return "Tidak ada berita terkini saat ini."
-
-            hasil = [
-                f"{i+1}. {a['title']} ({a['source']['name']})"
-                for i, a in enumerate(articles)
-            ]
-            judul = f"📰 Berita {topic.title()} terkini" if topic else "📰 Berita terkini"
-            return f"{judul} ({self._get_local_time()}):\n" + "\n".join(hasil)
-        except Exception as e:
-            print("News error:", e)
-            return "Tidak dapat mengambil berita terkini saat ini."
-
-    def _get_full_report(self, city="Surakarta", topic="indonesia"):
-        """Gabungkan waktu, berita, dan cuaca"""
-        now = self._get_local_time()
-        news = self._get_news(count=3, topic=topic)
-        weather = self._get_weather(city)
-        return f"🕓 Sekarang adalah {now}\n\n{news}\n\n{weather}"
+    def _extract_city(self, text):
+        match = re.search(r"cuaca(?: di| kota)?\s+(.*)", text, re.IGNORECASE)
+        if not match: return "Jakarta"
+        raw = match.group(1).lower()
+        for w in ["hari ini", "saat ini", "sekarang", "besok"]: raw = raw.replace(w, "")
+        return re.sub(r'[?!.,]', '', raw).strip() or "Jakarta"
 
     def reply(self, message):
         text = message.text.lower()
+        chat_id = message.chat.id
 
-        # 🔹 kombinasi otomatis (sinkron semua)
-        if any(kata in text for kata in ["hari ini", "tanggal", "hari apa", "berita hari ini"]):
-            return self.bot.reply_to(message, self._get_full_report())
+        # Waktu
+        if any(kw in text for kw in ["jam berapa", "waktu sekarang"]):
+            self.bot.reply_to(message, f"🕓 Sekarang: {self._get_local_time_str()}")
+            return
 
-        # 🌤 + 📰 kombinasi manual
-        if "cuaca" in text and "berita" in text:
-            city_match = re.search(r"cuaca di ([a-zA-Z\s]+)", text)
-            city = city_match.group(1).strip() if city_match else "Jakarta"
+        # Kompresi
+        if any(kw in text for kw in ["compress", "kompres", "kecilin file", "kecilin gambar", "perkecil ukuran"]):
+            self.bot.reply_to(
+                message,
+                "📉 *Fitur Kompresor Gambar*\nBisa banget! Kirim aja gambar atau PDF-nya 😉",
+                parse_mode="Markdown"
+            )
+            return
 
-            topic_match = re.search(r"berita tentang ([a-zA-Z\s]+)", text)
-            topic = topic_match.group(1).strip() if topic_match else "indonesia"
+        # Cuaca
+        if "cuaca" in text:
+            self.bot.send_chat_action(chat_id, 'typing')
+            self.bot.reply_to(message, self.weather_service.get_weather(self._extract_city(text)), parse_mode="Markdown")
+            return
 
-            res = self._get_full_report(city=city, topic=topic)
-            return self.bot.reply_to(message, res)
-
-        # 🌤 cuaca saja
-        elif "cuaca" in text:
-            city_match = re.search(r"cuaca di ([a-zA-Z\s]+)", text)
-            city = city_match.group(1).strip() if city_match else "Jakarta"
-            return self.bot.reply_to(message, self._get_weather(city))
-
-        # 📰 berita saja
-        elif "berita" in text:
-            topic_match = re.search(r"berita tentang ([a-zA-Z\s]+)", text)
-            topic = topic_match.group(1).strip() if topic_match else "indonesia"
-            return self.bot.reply_to(message, self._get_news(count=3, topic=topic))
-
-        # 🕓 waktu saja
-        elif any(kata in text for kata in ["jam berapa", "waktu sekarang"]):
-            return self.bot.reply_to(message, f"🕓 Sekarang adalah {self._get_local_time()}.")
-
-        # 🤖 default ke AI
+        # Fallback — ke Gemini AI
         try:
-            res = self.model.generate_content(message.text)
-            clean_text = self._remove_formatting(res.text)
-            self.bot.reply_to(message, clean_text, parse_mode="Markdown")
+            self.bot.send_chat_action(chat_id, 'typing')
+            res = self.model.generate_content(f"[Waktu: {self._get_local_time_str()}]\nUser: {message.text}")
+            self.bot.reply_to(message, res.text, parse_mode="Markdown")
         except Exception as e:
-            self.bot.reply_to(message, f"🤖 AI Error: {e}")
+            print(f"Gemini Error: {e}")
+            self.bot.reply_to(message, "🤖 Maaf, sistem sedang sibuk.")
