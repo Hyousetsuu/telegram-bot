@@ -1,6 +1,7 @@
 from features.downloader.youtube_downloader import YouTubeDownloader
 from features.downloader.tiktok_downloader import TikTokDownloader
 from features.downloader.instagram_downloader import InstagramDownloader
+from features.downloader.file_converter import FileConverter # ⬅️ BARU: Import FileConverter
 from features.ai.gemini_assistant import GeminiAssistant
 from telebot import types
 import re
@@ -32,18 +33,29 @@ def register_handlers(bot):
     yt = YouTubeDownloader(bot)
     tt = TikTokDownloader(bot)
     ig = InstagramDownloader(bot)
+    converter = FileConverter(bot) # ⬅️ BARU: Inisialisasi Converter
     ai = GeminiAssistant(bot)
 
     # ========================================================
-    # 🎯 Handler utama pesan teks
+    # 🎯 Handler utama pesan teks (Termasuk deteksi link dan command)
     # ========================================================
-    @bot.message_handler(func=lambda msg: True)
+    @bot.message_handler(func=lambda msg: True, content_types=['text'])
     def handler(message):
         text = message.text.strip()
         url = extract_url(text)
+        
+        # --- Pemeriksaan Command Konversi ---
+        if text.startswith('/imgtopdf'):
+            return converter.img_to_pdf(message)
+        elif text.startswith('/pdftoimg'):
+            return converter.pdf_to_img(message)
+        # ------------------------------------
+
         if not url:
+            # Jika bukan link dan bukan command konversi, kirim ke AI
             return ai.reply(message)
 
+        # Jika ada URL
         platform = detect_platform(url)
 
         # YouTube
@@ -72,7 +84,19 @@ def register_handlers(bot):
             return ig.download(message, url)
 
         else:
+            # Jika URL tidak dikenali (URL lain), kirim ke AI
             return ai.reply(message)
+
+    # ========================================================
+    # 📚 Handler untuk Perintah Konversi (Dipastikan terdeteksi meskipun pesan lain dikirim)
+    # ========================================================
+    @bot.message_handler(commands=['imgtopdf'])
+    def handle_img_to_pdf_command(message):
+        return converter.img_to_pdf(message)
+
+    @bot.message_handler(commands=['pdftoimg'])
+    def handle_pdf_to_img_command(message):
+        return converter.pdf_to_img(message)
 
     # ========================================================
     # 🎥 Callback YouTube
