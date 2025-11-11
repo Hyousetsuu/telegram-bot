@@ -5,107 +5,123 @@ from features.ai.gemini_assistant import GeminiAssistant
 from telebot import types
 import re
 
-# 🔹 Simpan link TikTok sementara
 pending_links = {}
 
-# ------------------------------------------------------------
-# 🔍 Deteksi URL dan Platform
-# ------------------------------------------------------------
 def extract_url(text: str):
     match = re.search(r"(https?://[^\s]+)", text)
     return match.group(1) if match else None
 
 def detect_platform(url: str):
     url = url.lower()
-    if any(x in url for x in ["youtube.com", "youtu.be"]):
+    if "youtube" in url or "youtu.be" in url:
         return "youtube"
-    elif any(x in url for x in ["tiktok.com", "vm.tiktok.com", "vt.tiktok.com"]):
+    if "tiktok" in url or "vm.tiktok" in url or "vt.tiktok" in url:
         return "tiktok"
-    elif any(x in url for x in ["instagram.com", "instagr.am"]):
+    if "instagram" in url or "instagr" in url:
         return "instagram"
     return None
 
-# ------------------------------------------------------------
-# 🚀 Register semua handler
-# ------------------------------------------------------------
 def register_handlers(bot):
     yt = YouTubeDownloader(bot)
     tt = TikTokDownloader(bot)
     ig = InstagramDownloader(bot)
     ai = GeminiAssistant(bot)
 
-    # ========================================================
-    # 🎯 Handler utama pesan teks
-    # ========================================================
+    # =============== MENU TOMBOL BAWAH ===============
+    @bot.message_handler(commands=['start'])
+    def start(message):
+        kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
+        kb.add(
+            types.KeyboardButton("📥 Cara Downloader"),
+            types.KeyboardButton("📉 Cara File Compressor"),
+            types.KeyboardButton("ℹ️ INFO")
+        )
+        bot.send_message(
+            message.chat.id,
+            "Halo! Pilih menu di bawah ya 😊",
+            reply_markup=kb
+        )
+
+    # =============== HANDLER PESAN ===============
     @bot.message_handler(func=lambda msg: True)
     def handler(message):
         text = message.text.strip()
+
+        # ------ TOMBOL MENU ------
+        if text == "📥 Cara Downloader":
+            bot.send_message(
+                message.chat.id,
+                "🎬 *Cara Download Video:*\n"
+                "1. Buka Instagram / TikTok / YouTube\n"
+                "2. Copy link video\n"
+                "3. Kirim link tersebut ke bot ini\n"
+                "4. Pilih format download yang muncul ✅",
+                parse_mode="Markdown"
+            )
+            return
+
+        if text == "📉 Cara File Compressor":
+            bot.send_message(
+                message.chat.id,
+                "📉 *Cara Kompres File:*\n"
+                "• Kirim gambar (.jpg / .png) atau file PDF\n"
+                "• Bot akan mengecilkan ukuran file otomatis 😉",
+                parse_mode="Markdown"
+            )
+            return
+
+        if text == "ℹ️ INFO":
+            bot.send_message(
+                message.chat.id,
+                "ℹ️ *INFO FITUR BOT:*\n\n"
+                "1. *DOWNLOADER* → Kirim link IG/TikTok/YT\n"
+                "2. *FILE COMPRESSOR* → Kirim gambar atau PDF\n"
+                "3. *INFO CUACA* → Ketik: `cuaca nama_kota`\n\n"
+                "Contoh: `cuaca jakarta`",
+                parse_mode="Markdown"
+            )
+            return
+
+        # ------ DETEKSI LINK ------
         url = extract_url(text)
         if not url:
             return ai.reply(message)
 
         platform = detect_platform(url)
 
-        # YouTube
         if platform == "youtube":
             yt.send_format_buttons(message, url)
             return
 
-        # TikTok
-        elif platform == "tiktok":
+        if platform == "tiktok":
             pending_links[message.chat.id] = url
-            markup = types.InlineKeyboardMarkup()
-            markup.add(
+            kb = types.InlineKeyboardMarkup()
+            kb.add(
                 types.InlineKeyboardButton("🎥 Video (MP4)", callback_data="tt_video"),
                 types.InlineKeyboardButton("🎵 Audio (MP3)", callback_data="tt_mp3"),
                 types.InlineKeyboardButton("🖼 Gambar", callback_data="tt_image")
             )
-            bot.send_message(
-                message.chat.id,
-                "🎬 Pilih format unduhan TikTok:",
-                reply_markup=markup
-            )
+            bot.send_message(message.chat.id, "Pilih format unduhan:", reply_markup=kb)
             return
 
-        # Instagram
-        elif platform == "instagram":
+        if platform == "instagram":
             return ig.download(message, url)
 
-        else:
-            return ai.reply(message)
+        return ai.reply(message)
 
-    # ========================================================
-    # 🎥 Callback YouTube
-    # ========================================================
-    @bot.callback_query_handler(func=lambda call: call.data.startswith("yt_"))
-    def callback_youtube(call):
-        try:
-            format_type, url = call.data.split("|", 1)
-            format_type = "mp4" if format_type == "yt_mp4" else "mp3"
-            bot.answer_callback_query(call.id, f"🔽 Mengunduh {format_type.upper()}...")
-            yt.download(call.message, url, format_type)
-        except Exception as e:
-            bot.send_message(call.message.chat.id, f"❌ Terjadi error: {e}")
-
-    # ========================================================
-    # 🎵 Callback TikTok
-    # ========================================================
+    # =============== CALLBACK TIKTOK ===============
     @bot.callback_query_handler(func=lambda call: call.data.startswith("tt_"))
     def callback_tiktok(call):
-        try:
-            url = pending_links.get(call.message.chat.id)
-            if not url:
-                bot.answer_callback_query(call.id, "❌ URL TikTok tidak ditemukan.")
-                return
+        url = pending_links.get(call.message.chat.id)
+        if not url:
+            bot.answer_callback_query(call.id, "❌ Link tidak ditemukan.")
+            return
 
-            bot.answer_callback_query(call.id, "📥 Mengunduh dari TikTok...")
+        bot.answer_callback_query(call.id, "⏳ Diproses...")
 
-            if call.data == "tt_video":
-                tt.download_video(call.message, url)
-            elif call.data == "tt_mp3":
-                tt.download_audio(call.message, url)
-            elif call.data == "tt_image":
-                tt.download_images(call.message, url)
-
-        except Exception as e:
-            bot.send_message(call.message.chat.id, f"❌ Terjadi error: {e}")
+        if call.data == "tt_video":
+            tt.download_video(call.message, url)
+        elif call.data == "tt_mp3":
+            tt.download_audio(call.message, url)
+        elif call.data == "tt_image":
+            tt.download_images(call.message, url)
