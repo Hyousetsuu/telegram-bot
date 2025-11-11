@@ -1,7 +1,7 @@
 import os
 import time
 from PIL import Image
-import pikepdf # Import library baru
+import pikepdf
 from telebot import types
 
 class Compressor:
@@ -11,154 +11,121 @@ class Compressor:
         if not os.path.exists(self.temp_folder):
             os.makedirs(self.temp_folder)
         
-        # Batas download file dari API Telegram adalah 20MB
-        self.MAX_DOWNLOAD_SIZE = 20 * 1024 * 1024 
+        self.MAX_DOWNLOAD_SIZE = 20 * 1024 * 1024 # 20MB
 
-    def offer_compression(self, message):
-        """Menawarkan opsi DAN memvalidasi ukuran file."""
-        markup = types.InlineKeyboardMarkup()
+    def _get_file_id_from_call(self, call):
+        """Helper untuk mengambil file_id dari pesan yang dibalas oleh tombol."""
+        msg = call.message.reply_to_message # Ini adalah pesan file asli
         
+        file_id, ext = None, ".tmp"
         file_size = 0
-        is_image = False
-        is_pdf = False
 
-        if message.photo:
-            file_size = message.photo[-1].file_size
-            is_image = True
-        elif message.document:
-            file_size = message.document.file_size # Ambil ukuran file
-            mime = message.document.mime_type
+        if msg.photo:
+            file_id = msg.photo[-1].file_id
+            file_size = msg.photo[-1].file_size
+            ext = ".jpg"
+        elif msg.document:
+            file_id = msg.document.file_id
+            file_size = msg.document.file_size
+            mime = msg.document.mime_type
             if mime.startswith("image/"):
-                is_image = True
+                ext = ".png" if "png" in mime else ".jpg"
             elif mime == "application/pdf":
-                is_pdf = True
-
-        # --- VALIDASI UKURAN FILE (Sangat Penting) ---
+                ext = ".pdf"
+        
         if file_size > self.MAX_DOWNLOAD_SIZE:
-            size_mb = file_size / (1024 * 1024)
-            self.bot.reply_to(
-                message, 
-                f"❌ **File Terlalu Besar**\n"
-                f"Ukuran file Anda ({size_mb:.1f} MB) melebihi batas 20 MB.",
-                parse_mode="Markdown"
-            )
-            return # Hentikan proses
-        # ------------------------------------
-
-        text = ""
-        if is_image:
-            markup.add(
-                types.InlineKeyboardButton("📉 Ringan (70%)", callback_data="img_70"),
-                types.InlineKeyboardButton("😐 Sedang (50%)", callback_data="img_50"),
-                types.InlineKeyboardButton("🗜 Ekstrem (30%)", callback_data="img_30")
-            )
-            text = "🖼 **Kompresor Gambar**\nPilih tingkat kompresi:"
+            raise Exception(f"File terlalu besar ({file_size / (1024*1024):.1f} MB). Batas 20 MB.")
             
-        elif is_pdf:
-            markup.add(types.InlineKeyboardButton("🗜 Kompres PDF Sekarang", callback_data="pdf_compress"))
-            text = "📄 **Kompresor PDF**\nTekan tombol di bawah untuk memperkecil ukuran PDF."
+        if not file_id:
+            raise Exception("File tidak dapat ditemukan.")
             
-        else:
-            return # Tipe tidak didukung
-
-        self.bot.reply_to(message, text, reply_markup=markup, parse_mode="Markdown")
+        return file_id, ext
 
     def process_image(self, call, quality):
-        """Proses Kompresi Gambar (JPG/PNG)."""
-        msg = call.message.reply_to_message
-        status_msg = self.bot.send_message(call.message.chat.id, f"⏳ Mengompres gambar...")
+        """Proses Kompresi Gambar (Dipanggil oleh callback)."""
+        # Edit pesan tombol menjadi "Memproses..."
+        self.bot.edit_message_text("⏳ Mengompres gambar...", call.message.chat.id, call.message.message_id, reply_markup=None)
+        status_msg = None
         input_path, output_path = None, None
-
+        
         try:
-            if msg.photo:
-                file_id, ext = msg.photo[-1].file_id, ".jpg"
-            else:
-                file_id, ext = msg.document.file_id, ".png" if "png" in msg.document.mime_type else ".jpg"
+            file_id, ext = self._get_file_id_from_call(call)
+            
+            # Buat pesan status baru
+            status_msg = self.bot.send_message(call.message.chat.id, f"⏳ Mengunduh & mengompres ke {quality}%...")
 
             file_info = self.bot.get_file(file_id)
-            downloaded_data = self.bot.download_file(file_info.file_path)
+            data = self.bot.download_file(file_info.file_path)
             
-            timestamp = int(time.time())
-            input_path = os.path.join(self.temp_folder, f"img_in_{timestamp}{ext}")
-            output_path = os.path.join(self.temp_folder, f"img_out_{timestamp}{ext}")
+            ts = int(time.time())
+            input_path = os.path.join(self.temp_folder, f"img_in_{ts}{ext}")
+            output_path = os.path.join(self.temp_folder, f"img_out_{ts}{ext}")
 
-            with open(input_path, "wb") as f: f.write(downloaded_data)
+            with open(input_path, "wb") as f: f.write(data)
 
-            original_size = os.path.getsize(input_path) / 1024
+            ori_size = os.path.getsize(input_path) / 1024
             img = Image.open(input_path)
             if img.mode in ("RGBA", "P"): img = img.convert("RGB")
             img.save(output_path, "JPEG", optimize=True, quality=quality)
-            compressed_size = os.path.getsize(output_path) / 1024
+            comp_size = os.path.getsize(output_path) / 1024
 
-            self._send_result(call.message.chat.id, output_path, original_size, compressed_size, "Gambar")
-            self.bot.delete_message(call.message.chat.id, status_msg.message_id)
-
+            self._send_result(call.message.chat.id, output_path, ori_size, comp_size, "Gambar")
+            self.bot.delete_message(call.message.chat.id, status_msg.message_id) # Hapus pesan status
+            
         except Exception as e:
             print(f"Image Error: {e}")
-            self.bot.edit_message_text("❌ Gagal mengompres gambar. File mungkin rusak.", call.message.chat.id, status_msg.message_id)
+            if status_msg: self.bot.edit_message_text(f"❌ Gagal: {e}", call.message.chat.id, status_msg.message_id)
+            else: self.bot.send_message(call.message.chat.id, f"❌ Gagal: {e}")
         finally:
             self._cleanup(input_path, output_path)
 
     def process_pdf(self, call):
-        """Proses Kompresi PDF (Metode Kompatibel TANPA linearize)."""
-        msg = call.message.reply_to_message
-        status_msg = self.bot.send_message(call.message.chat.id, "⏳ Mengompres PDF (Mode Kompatibel)...")
+        """Proses Kompresi PDF (Dipanggil oleh callback)."""
+        self.bot.edit_message_text("⏳ Mengompres PDF...", call.message.chat.id, call.message.message_id, reply_markup=None)
+        status_msg = None
         input_path, output_path = None, None
-
+        
         try:
-            file_info = self.bot.get_file(msg.document.file_id)
-            downloaded_data = self.bot.download_file(file_info.file_path)
+            file_id, ext = self._get_file_id_from_call(call)
+            if ext != ".pdf": raise Exception("Bukan file PDF.")
             
-            timestamp = int(time.time())
-            input_path = os.path.join(self.temp_folder, f"pdf_in_{timestamp}.pdf")
-            output_path = os.path.join(self.temp_folder, f"pdf_out_{timestamp}.pdf")
+            status_msg = self.bot.send_message(call.message.chat.id, "⏳ Mengunduh & mengompres PDF...")
 
-            with open(input_path, "wb") as f: f.write(downloaded_data)
+            file_info = self.bot.get_file(file_id)
+            data = self.bot.download_file(file_info.file_path)
+            
+            ts = int(time.time())
+            input_path = os.path.join(self.temp_folder, f"pdf_in_{ts}.pdf")
+            output_path = os.path.join(self.temp_folder, f"pdf_out_{ts}.pdf")
 
-            original_size = os.path.getsize(input_path) / 1024
+            with open(input_path, "wb") as f: f.write(data)
+
+            ori_size = os.path.getsize(input_path) / 1024
             
             with pikepdf.open(input_path) as pdf:
-                
-                # --- INI METODE YANG BENAR (TANPA 'minimize_size') ---
-                # 1. Hapus metadata (jika ada)
-                try: 
-                    del pdf.Root.Metadata
-                except: 
-                    pass
-                
-                # 2. Hapus data tidak terpakai
-                try:
-                    pdf.remove_unreferenced_resources()
-                except:
-                    pass
+                try: del pdf.Root.Metadata
+                except: pass
+                try: pdf.remove_unreferenced_resources()
+                except: pass
+                pdf.save(output_path, object_stream_mode=pikepdf.ObjectStreamMode.generate)
 
-                # 3. Simpan dengan kompresi stream (TANPA linearize)
-                pdf.save(
-                    output_path, 
-                    object_stream_mode=pikepdf.ObjectStreamMode.generate
-                )
-                # ----------------------------------------------------
+            comp_size = os.path.getsize(output_path) / 1024
 
-            compressed_size = os.path.getsize(output_path) / 1024
-            
-            # Cek apakah ukurannya benar-benar berkurang
-            if compressed_size >= original_size:
-                self.bot.edit_message_text("ℹ️ Info: File PDF ini sudah optimal (tidak bisa dikecilkan lagi).", call.message.chat.id, status_msg.message_id)
+            if comp_size >= ori_size:
+                self.bot.edit_message_text("ℹ️ PDF ini sudah optimal.", call.message.chat.id, status_msg.message_id)
             else:
-                self._send_result(call.message.chat.id, output_path, original_size, compressed_size, "PDF")
+                self._send_result(call.message.chat.id, output_path, ori_size, comp_size, "PDF")
                 self.bot.delete_message(call.message.chat.id, status_msg.message_id)
-
         except Exception as e:
             print(f"PDF Error: {e}")
-            self.bot.edit_message_text(f"❌ Gagal kompres PDF: File mungkin terkunci/rusak.", call.message.chat.id, status_msg.message_id)
+            if status_msg: self.bot.edit_message_text(f"❌ Gagal: {e}", call.message.chat.id, status_msg.message_id)
+            else: self.bot.send_message(call.message.chat.id, f"❌ Gagal: {e}")
         finally:
             self._cleanup(input_path, output_path)
 
     def _send_result(self, chat_id, file_path, ori_size, comp_size, type_name):
-        """Helper untuk mengirim file hasil."""
         saved = ori_size - comp_size
         percent = (saved / ori_size) * 100 if ori_size > 0 else 0
-        
         caption = (
             f"✅ **{type_name} Berhasil Dikompres!**\n"
             f"📦 Sebelum: {ori_size:.1f} KB\n"
@@ -169,8 +136,7 @@ class Compressor:
             self.bot.send_document(chat_id, f, caption=caption, parse_mode="Markdown")
 
     def _cleanup(self, *paths):
-        """Membersihkan file sementara."""
         for path in paths:
             try:
-                if os.path.exists(path): os.remove(path)
+                if path and os.path.exists(path): os.remove(path)
             except: pass

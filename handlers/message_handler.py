@@ -4,10 +4,9 @@ from features.downloader.youtube_downloader import YouTubeDownloader
 from features.downloader.tiktok_downloader import TikTokDownloader
 from features.downloader.instagram_downloader import InstagramDownloader
 from features.ai.gemini_assistant import GeminiAssistant
-from features.tools.compressor import Compressor # Import class yang benar
+from features.tools.compressor import Compressor      
+from features.tools.file_converter import FileConverter  
 
-# 🔹 Variabel global untuk menyimpan link sementara
-# Key: chat_id, Value: url
 pending_links = {}
 
 # ------------------------------------------------------------
@@ -16,7 +15,10 @@ pending_links = {}
 
 def extract_url(text: str):
     """Mencari link (URL) pertama di dalam teks."""
+    # --- PERBAIKAN BUG DI SINI ---
+    # Menghapus 'https' ekstra dari regex
     match = re.search(r"(https?://[^\s]+)", text)
+    # -----------------------------
     return match.group(1) if match else None
 
 def detect_platform(url: str):
@@ -32,98 +34,143 @@ def detect_platform(url: str):
 # ------------------------------------------------------------
 def register_handlers(bot):
     
-    # Inisialisasi semua kelas fitur
     yt = YouTubeDownloader(bot)
     tt = TikTokDownloader(bot)
     ig = InstagramDownloader(bot)
     ai = GeminiAssistant(bot)
-    compressor = Compressor(bot) # Nama class sudah benar
+    compressor = Compressor(bot) 
+    converter = FileConverter(bot) 
 
     # ========================================================
-    # 🖼 Handler untuk TIPE KONTEN (Foto & Dokumen)
+    # 🖼 HANDLER 1: Menangkap FILE (Foto & Dokumen)
     # ========================================================
     @bot.message_handler(content_types=['photo', 'document'])
     def handle_files(message):
-        """Handler ini menangkap semua kiriman foto dan dokumen."""
-        is_valid = False
-        
-        # Cek apakah itu Foto
-        if message.photo: 
-            is_valid = True
-        
-        # Cek apakah itu Dokumen (Gambar atau PDF)
-        elif message.document:
-            mime = message.document.mime_type
-            if mime.startswith("image/") or mime == "application/pdf":
-                is_valid = True
-        
-        # Jika file valid (Gambar/PDF), tawarkan kompresi
-        if is_valid:
-            compressor.offer_compression(message)
-            return # 'return' penting agar handler teks di bawah tidak ikut dijalankan
-
-    # ========================================================
-    # 🎯 Handler Utama Pesan Teks (Prioritas Terendah)
-    # ========================================================
-    @bot.message_handler(func=lambda msg: True)
-    def handler_text(message):
-        """Handler ini menangkap semua pesan teks."""
-        text = message.text.strip()
-        url = extract_url(text)
-
-        # Jika pesan BUKAN link, lempar ke AI
-        if not url:
-            return ai.reply(message)
-
-        # Jika pesan ADALAH link, deteksi platformnya
-        platform = detect_platform(url)
-
-        # --- YOUTUBE ---
-        if platform == "youtube":
-            pending_links[message.chat.id] = url # Simpan link di memori
-            yt.send_format_buttons(message) # Tampilkan tombol (tanpa URL)
-
-        # --- TIKTOK ---
-        elif platform == "tiktok":
-            pending_links[message.chat.id] = url # Simpan link di memori
-            markup = types.InlineKeyboardMarkup()
-            markup.add(
-                types.InlineKeyboardButton("🎥 Video (MP4)", callback_data="tt_video"),
-                types.InlineKeyboardButton("🎵 Audio (MP3)", callback_data="tt_mp3"),
-                types.InlineKeyboardButton("🖼 Gambar", callback_data="tt_image")
-            )
-            bot.send_message(message.chat.id, "🎬 Pilih format unduhan TikTok:", reply_markup=markup)
-
-        # --- INSTAGRAM ---
-        elif platform == "instagram":
-            ig.download(message, url) # Instagram langsung download
-
-        # --- LINK LAIN (Fallback ke AI) ---
-        else:
-            # Jika link tidak dikenal (misal: google.com), biarkan AI yang jawab
-            ai.reply(message)
-
-    # ========================================================
-    # CALLBACK HANDLERS (Saat Tombol Ditekan)
-    # ========================================================
-
-    # 🗜 Callback Compressor
-    @bot.callback_query_handler(func=lambda call: "img_" in call.data or "pdf_" in call.data)
-    def callback_compressor(call):
+        """
+        Handler ini menangkap semua kiriman file dan menawarkan
+        aksi (Kompres/Konversi) melalui tombol balasan.
+        """
         try:
-            if "img_" in call.data:
-                quality = int(call.data.split("_")[1])
-                bot.answer_callback_query(call.id, "Mulai kompres gambar...")
-                compressor.process_image(call, quality)
-            elif "pdf_" in call.data:
-                bot.answer_callback_query(call.id, "Mulai kompres PDF...")
-                compressor.process_pdf(call)
-        except Exception as e:
-            # Sembunyikan error teknis dari user
-            print(f"Callback Compressor Error: {e}")
-            bot.send_message(call.message.chat.id, "❌ Terjadi error sistem. Coba lagi.")
+            markup = types.InlineKeyboardMarkup()
+            
+            # KASUS 1: USER MENGIRIM FOTO
+            if message.photo:
+                # Menambahkan kembali 3 tombol kompresi + 1 tombol konversi
+                markup.add(types.InlineKeyboardButton("--- 🗜 Kompres Gambar ---", callback_data="action_ignore"))
+                markup.add(
+                    types.InlineKeyboardButton("📉 Ringan (70%)", callback_data="action_compress_img_70"),
+                    types.InlineKeyboardButton("😐 Sedang (50%)", callback_data="action_compress_img_50"),
+                    types.InlineKeyboardButton("🧱 Ekstrem (30%)", callback_data="action_compress_img_30")
+                )
+                markup.add(types.InlineKeyboardButton("--- 🔄 Konversi ---", callback_data="action_ignore"))
+                markup.add(types.InlineKeyboardButton("Ubah ke PDF", callback_data="action_convert_img_pdf"))
+                bot.reply_to(message, "Pilih aksi untuk Gambar ini:", reply_markup=markup)
+                return
 
-    # 🎥 Callback YouTube
+            # KASUS 2: USER MENGIRIM DOKUMEN
+            if message.document:
+                mime = message.document.mime_type
+                
+                # Jika dokumen adalah Gambar (misal PNG)
+                if mime.startswith("image/"):
+                    markup.add(types.InlineKeyboardButton("--- 🗜 Kompres Gambar ---", callback_data="action_ignore"))
+                    markup.add(
+                        types.InlineKeyboardButton("📉 Ringan (70%)", callback_data="action_compress_img_70"),
+                        types.InlineKeyboardButton("😐 Sedang (50%)", callback_data="action_compress_img_50"),
+                        types.InlineKeyboardButton("🧱 Ekstrem (30%)", callback_data="action_compress_img_30")
+                    )
+                    markup.add(types.InlineKeyboardButton("--- 🔄 Konversi ---", callback_data="action_ignore"))
+                    markup.add(types.InlineKeyboardButton("Ubah ke PDF", callback_data="action_convert_img_pdf"))
+                    bot.reply_to(message, "Pilih aksi untuk file Gambar ini:", reply_markup=markup)
+                    return
+                
+                # Jika dokumen adalah PDF
+                elif mime == "application/pdf":
+                    markup.add(
+                        types.InlineKeyboardButton("🗜 Kompres PDF", callback_data="action_compress_pdf"),
+                        types.InlineKeyboardButton("🔄 Konversi ke Gambar", callback_data="action_convert_pdf_img")
+                    )
+                    bot.reply_to(message, "Pilih aksi untuk file PDF ini:", reply_markup=markup)
+                    return
+            
+            pass
+
+        except Exception as e:
+            print(f"File Handler Error: {e}")
+
+    # ========================================================
+    # 🎯 HANDLER 2: Menangkap PESAN TEKS (Link & AI Fallback)
+    # ========================================================
+    @bot.message_handler(content_types=['text'])
+    def handler_text(message):
+        """
+        Handler ini menangkap semua pesan teks (link atau obrolan AI).
+        """
+        try:
+            text = message.text.strip()
+            url = extract_url(text) # <-- Sekarang sudah diperbaiki
+
+            if not url:
+                return ai.reply(message) # Ke AI
+
+            platform = detect_platform(url)
+            if platform == "youtube":
+                pending_links[message.chat.id] = url
+                yt.send_format_buttons(message) # <-- Ini akan jalan lagi
+            elif platform == "tiktok":
+                pending_links[message.chat.id] = url
+                markup = types.InlineKeyboardMarkup()
+                markup.add(
+                    types.InlineKeyboardButton("🎥 Video (MP4)", callback_data="tt_video"),
+                    types.InlineKeyboardButton("🎵 Audio (MP3)", callback_data="tt_mp3"),
+                    types.InlineKeyboardButton("🖼 Gambar", callback_data="tt_image")
+                )
+                bot.send_message(message.chat.id, "🎬 Pilih format unduhan TikTok:", reply_markup=markup)
+            elif platform == "instagram":
+                ig.download(message, url)
+            else:
+                ai.reply(message) # Link tidak dikenal
+        except Exception as e:
+            print(f"Text Handler Error: {e}")
+            bot.reply_to(message, "❌ Terjadi error saat memproses pesan teks.")
+
+
+    # ========================================================
+    #  CALLBACK HANDLERS (Semua Tombol)
+    # ========================================================
+    
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("action_"))
+    def callback_actions(call):
+        """Menangani tombol aksi untuk Kompres/Konversi."""
+        try:
+            action = call.data
+            
+            # Aksi Kompresor (dengan 3 pilihan)
+            if action == "action_compress_img_70":
+                compressor.process_image(call, 70) 
+            elif action == "action_compress_img_50":
+                compressor.process_image(call, 50)
+            elif action == "action_compress_img_30":
+                compressor.process_image(call, 30)
+            elif action == "action_compress_pdf":
+                compressor.process_pdf(call)
+                
+            # Aksi Konverter
+            elif action == "action_convert_img_pdf":
+                converter.process_img_to_pdf(call)
+            elif action == "action_convert_pdf_img":
+                converter.process_pdf_to_img(call)
+                
+            elif action == "action_ignore":
+                bot.answer_callback_query(call.id, text="Pilih aksi...")
+            else:
+                bot.answer_callback_query(call.id, "Aksi tidak diketahui.")
+
+        except Exception as e:
+            print(f"Action Callback Error: {e}")
+            bot.send_message(call.message.chat.id, f"❌ Gagal memproses aksi: {e}")
+
+    
     @bot.callback_query_handler(func=lambda call: call.data.startswith("yt_"))
     def callback_youtube(call):
         try:
@@ -131,16 +178,13 @@ def register_handlers(bot):
             if not url:
                 bot.answer_callback_query(call.id, "❌ Link kadaluarsa. Kirim ulang.")
                 return
-
             format_type = "mp4" if call.data == "yt_mp4" else "mp3"
             bot.answer_callback_query(call.id, f"🔽 Mengunduh {format_type.upper()}...")
             yt.download(call.message, url, format_type)
         except Exception as e:
-            # Sembunyikan error teknis dari user
             print(f"YouTube Callback Error: {e}")
             bot.send_message(call.message.chat.id, "❌ Error saat memproses link YouTube.")
 
-    # 🎵 Callback TikTok
     @bot.callback_query_handler(func=lambda call: call.data.startswith("tt_"))
     def callback_tiktok(call):
         try:
@@ -154,6 +198,5 @@ def register_handlers(bot):
             elif call.data == "tt_mp3": tt.download_audio(call.message, url)
             elif call.data == "tt_image": tt.download_images(call.message, url)
         except Exception as e:
-            # Sembunyikan error teknis dari user
             print(f"TikTok Callback Error: {e}")
             bot.send_message(call.message.chat.id, "❌ Error saat memproses link TikTok.")
