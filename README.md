@@ -1,94 +1,130 @@
-===========================================
-📱 TELEGRAM MEDIA DOWNLOADER BOT
-===========================================
+🤖 Asisten AI Telegram Multi-Fungsi
+Ini bukan sekadar bot biasa. Ini adalah asisten AI Telegram yang ditenagai oleh Google Gemini, dirancang untuk menjadi alat "semua-dalam-satu" Anda.
 
-Bot Telegram ini berfungsi untuk mengunduh video dan audio dari berbagai platform media sosial populer,
-seperti YouTube, TikTok, dan Instagram. 
-Semua proses dilakukan langsung melalui chat Telegram, tanpa perlu membuka aplikasi lain.
+Bot ini dapat diajak bicara untuk menjawab pertanyaan pengetahuan umum, sekaligus dilengkapi dengan berbagai tools produktivitas seperti downloader media sosial, kompresor file, konverter file, dan penyedia informasi real-time.
 
-Bot ini dibuat menggunakan bahasa pemrograman Python dengan berbagai library pendukung
-untuk mempermudah proses download, konversi, dan pengiriman media ke pengguna.
+Semua fitur dirancang untuk bekerja secara intuitif. Cukup kirim link untuk mengunduh, kirim file untuk mengedit, atau kirim teks untuk mengobrol.
 
+🚀 Fitur Utama
+Bot ini menggabungkan beberapa fungsi utama ke dalam satu antarmuka yang mulus:
 
-===========================================
-🚀 FITUR-FITUR UTAMA
-===========================================
-✅ Unduh video dari YouTube  
-✅ Unduh audio (MP3) dari YouTube  
-✅ Unduh video TikTok tanpa watermark  
-✅ Unduh audio dari video TikTok  
-✅ Unduh video dari Instagram  
-✅ Konversi video Instagram menjadi file MP3  
-✅ Menu interaktif berbasis Inline Button untuk navigasi mudah  
+1. Asisten AI & Informasi
+Asisten AI (Gemini): Ditenagai oleh gemini-2.5-flash, bot dapat menjawab pertanyaan pengetahuan umum, memberi ide, membuatkan kode, atau sekadar diajak ngobrol.
 
+Info Cuaca Real-time: Memberikan cuaca saat ini DAN prediksi untuk hari berikutnya di lokasi yang diminta (didukung oleh OpenWeatherMap).
 
-===========================================
-🧰 TEKNOLOGI & LIBRARY
-===========================================
-- Python 3.x
-- PyTelegramBotAPI (telebot)
-- pytubefix
-- requests
-- pydub
-- ffmpeg
+Berita Terkini: Mengambil berita terbaru dari Google News (gnews) berdasarkan topik, dengan dukungan pencarian internasional.
 
-Semua library dapat diinstal otomatis melalui file `requirements.txt`.
+2. Downloader Media (Otomatis)
+YouTube: Mengunduh video (MP4) atau audio (MP3) saat link dikirim.
 
+TikTok: Mengunduh video tanpa watermark, audio, atau slideshow gambar.
 
-===========================================
-⚙️ CARA MENJALANKAN SECARA LOKAL
-===========================================
-1. Pastikan Python sudah terinstal di komputer Anda.
-2. Clone atau download repository ini.
-3. Buka terminal (Command Prompt) dan masuk ke direktori project.
-4. Jalankan perintah untuk menginstal semua library:
-   pip install -r requirements.txt
-5. Buka file `main.py` dan ganti baris TOKEN dengan token bot Telegram Anda:
-   TOKEN = "MASUKKAN_TOKEN_BOT_ANDA"
-6. Jalankan bot dengan perintah:
-   python main.py
-7. Jika muncul tulisan:
-   ✅ Bot berjalan...
-   berarti bot Anda sudah aktif dan siap digunakan.
+Instagram: Mengunduh foto atau video (Reels/Post) dari link.
 
+3. Alat Produktivitas (Otomatis)
+Bot ini menggunakan handler cerdas. Cukup kirim file, dan bot akan menawarkan pilihan aksi:
 
-===========================================
-🌐 JALANKAN ONLINE 24 JAM MENGGUNAKAN RENDER.COM
-===========================================
-1. Push seluruh file project ini ke repository GitHub Anda.
-2. Buka situs: https://render.com
-3. Login menggunakan akun GitHub, lalu klik “New Web Service”.
-4. Pilih repository project ini.
-5. Isi bagian berikut:
-   - Branch: main (atau master, sesuai nama branch di GitHub Anda)
-   - Build Command: pip install -r requirements.txt
-   - Start Command: python main.py
-6. Klik tombol “Create Web Service”.
-7. Tunggu hingga status service berubah menjadi "Live".
-8. Bot Anda kini aktif 24 jam nonstop di server Render.com.
+Kompresor Gambar: Memperkecil ukuran file .jpg atau .png dengan 3 pilihan kualitas (Ringan, Sedang, Ekstrem).
 
+Kompresor PDF: Mengoptimalkan dan memperkecil ukuran file .pdf (menggunakan pikepdf).
 
-===========================================
-📄 CATATAN
-===========================================
-- Bot ini dibuat untuk tujuan pembelajaran dan penggunaan pribadi.
-- Harap tidak menyalahgunakan untuk melanggar hak cipta atau ketentuan platform terkait.
-- Jika menggunakan konversi MP3, pastikan `ffmpeg` telah terpasang dengan benar.
-- Gunakan dengan bijak dan bertanggung jawab.
+Konverter Gambar ke PDF: Mengubah file .jpg atau .png menjadi satu dokumen .pdf.
 
+Konverter PDF ke Gambar: Mengubah halaman dari file .pdf menjadi beberapa gambar .jpg (maks. 5 halaman).
 
-===========================================
-👨‍💻 PENGEMBANG
-===========================================
-Nama Kelompok : Fiko nanda Ramadani
-                Lintang Wahyu Aji Saputro
-                Nabila Wahyu Ningtias
-                Dhian Joedhistiro
-                Egie Irawan
+🧰 Teknologi & Library Utama
+Proyek ini dibangun dengan Python 3.10+ dan memanfaatkan berbagai library modern:
 
-Teknologi: Python + Telegram Bot API  
-Tahun: 2025  
-Lisensi: Open Source (Free to Use and Modify)
+Bot Framework: pyTelegramBotAPI
 
-Bot Tele yang sudah jadi dan bisa di coba langsung fitur nya
-@JKW48_Bot
+Model AI: google-generativeai
+
+Downloader: yt-dlp (YouTube/TikTok), instaloader (Instagram)
+
+Manipulasi File:
+
+Pillow (Kompresi & Konversi Gambar)
+
+pikepdf (Kompresi PDF)
+
+PyMuPDF (fitz) (Konversi PDF ke Gambar)
+
+Layanan Info: gnews (Berita), requests (Cuaca)
+
+Konfigurasi: python-dotenv (Manajemen API Key)
+
+PENTING: Proyek ini juga membutuhkan FFmpeg agar dapat menggabungkan video dan audio (khususnya untuk yt-dlp).
+
+⚙️ Cara Menjalankan Secara Lokal
+Clone Repository
+
+Bash
+
+git clone https://github.com/URL_REPOSITORY_ANDA.git
+cd telegram-bot
+Buat & Aktifkan Virtual Environment
+
+Bash
+
+# Buat venv
+python -m venv .venv
+# Aktifkan di Windows
+.\.venv\Scripts\activate
+Install Dependensi Pastikan ffmpeg sudah terinstal di sistem Anda. Lalu instal library Python:
+
+Bash
+
+pip install -r requirements.txt
+Buat File .env Buat file bernama .env di direktori utama dan isi dengan API Key Anda.
+
+Ini, TOML
+
+# Token dari @BotFather
+BOT_TOKEN="12345:ABCDEFG..."
+
+# API Key dari Google AI Studio
+GEMINI_API_KEY="AIzaSy..."
+
+# API Key dari OpenWeatherMap
+OPENWEATHER_API_KEY="abcdef..."
+
+# Opsional (Sangat disarankan agar download IG stabil)
+INSTAGRAM_USER="username_ig_anda"
+INSTAGRAM_PASS="password_ig_anda"
+Jalankan Bot
+
+Bash
+
+python main.py
+🌐 Cara Menjalankan Online (Render.com)
+Push seluruh file (termasuk requirements.txt) ke repository GitHub Anda.
+
+Buka Render.com dan buat akun.
+
+Klik "New" -> "Web Service" dan hubungkan ke repository GitHub Anda.
+
+Isi bagian berikut saat setup:
+
+Build Command: pip install -r requirements.txt
+
+Start Command: python main.py
+
+(PENTING) Buka tab "Environment" di dashboard Render Anda.
+
+Klik "Add Environment Variable" dan tambahkan semua Key dari file .env Anda satu per satu (misal: Key: BOT_TOKEN, Value: 12345:ABCDEFG...).
+
+Klik "Create Web Service". Render akan otomatis men-deploy bot Anda.
+
+👨‍💻 Pengembang
+Fiko nanda Ramadani
+
+Lintang Wahyu Aji Saputro
+
+Nabila Wahyu Ningtias
+
+Dhian Joedhistiro
+
+Egie Irawan
+
+Bot yang sudah jadi: @JKW48_Bot
