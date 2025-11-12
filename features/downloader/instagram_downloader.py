@@ -1,7 +1,7 @@
 import instaloader
 import os
 import re
-import shutil # Kita pakai shutil untuk menghapus folder
+import shutil 
 
 class InstagramDownloader:
     def __init__(self, bot):
@@ -17,8 +17,6 @@ class InstagramDownloader:
             download_video_thumbnails=False, 
             save_metadata=False, 
             compress_json=False,
-            # HAPUS dirname_pattern DARI SINI
-            # Ini adalah salah satu penyebab kebingungan path
         )
         
         self._login()
@@ -29,25 +27,36 @@ class InstagramDownloader:
             print("⚠️ Peringatan: INSTAGRAM_USER/PASS tidak ada di .env. Download IG mungkin akan gagal.")
             return
 
-        # Tentukan path file session DENGAN BENAR
         session_file = os.path.join(self.session_path, f"session-{self.username}.json.xz")
         
         try:
             if os.path.exists(session_file):
-                print("Memuat session Instagram...")
+                print("Mencoba memuat session Instagram yang ada...")
                 self.loader.load_session_from_file(self.username, session_file)
+                
+                # Cek apakah session yang dimuat valid
+                if not self.loader.context.is_logged_in:
+                    # Jika tidak valid, lempar error agar login baru
+                    raise Exception("Session file ada tapi tidak valid (gagal login).")
+                
                 print("Session Instagram berhasil dimuat.")
             else:
-                print("Melakukan login baru ke Instagram...")
+                # Jika file tidak ada, paksa login baru
+                raise Exception("Session file tidak ditemukan, login baru diperlukan.")
+                
+        except Exception as e:
+            # Jika GAGAL memuat session (atau file tidak ada), lakukan login baru
+            print(f"Info: {e}. Melakukan login baru ke Instagram...")
+            try:
                 self.loader.login(self.username, self.password)
                 print("Login Instagram berhasil. Menyimpan session...")
                 self.loader.save_session_to_file(session_file)
                 print("Session Instagram berhasil disimpan.")
-        except Exception as e:
-            print(f"❌ Gagal login Instagram: {e}. Download mungkin akan gagal.")
+            except Exception as login_err:
+                print(f"❌ GAGAL LOGIN BARU: {login_err}. Download IG akan gagal.")
 
     def download(self, message, url: str):
-        target_dir = None # Ini adalah folder 'ig_temp_...'
+        target_dir = None 
         try:
             status_msg = self.bot.send_message(message.chat.id, "⏳ Mengambil media dari Instagram...")
 
@@ -61,22 +70,19 @@ class InstagramDownloader:
             target_dir = f"ig_temp_{shortcode}"
             
             self.bot.edit_message_text("⬇️ Mengunduh media...", message.chat.id, status_msg.message_id)
-            # Instaloader akan men-download ke: 'ig_temp_SHORTCODE/NAMA_PROFIL/'
             self.loader.download_post(post, target=target_dir)
 
-            # --- PERBAIKAN LOGIKA PENCARIAN FILE ---
-            # 1. Cari sub-folder yang dibuat instaloader
+            # Cari sub-folder (perbaikan dari bug sebelumnya)
             subfolders = [f.path for f in os.scandir(target_dir) if f.is_dir()]
             if not subfolders:
-                raise Exception("Instaloader tidak membuat subfolder profil.")
-                
-            actual_download_path = subfolders[0] # Ini adalah path 'ig_temp_.../NAMA_PROFIL'
+                # Fallback: jika tidak ada subfolder (kadang terjadi), cari di folder utama
+                actual_download_path = target_dir
+            else:
+                actual_download_path = subfolders[0] 
 
-            # 2. Cari file di dalam sub-folder tersebut
             files = [os.path.join(actual_download_path, f) for f in os.listdir(actual_download_path) if f.endswith(('.jpg', '.mp4'))]
             if not files:
-                raise Exception("Tidak menemukan file media di dalam subfolder.")
-            # ----------------------------------------
+                raise Exception("Tidak menemukan file media.")
 
             self.bot.edit_message_text(f"⬆️ Mengirim {len(files)} media...", message.chat.id, status_msg.message_id)
             for fpath in files:
@@ -91,8 +97,8 @@ class InstagramDownloader:
 
         except Exception as e:
             print(f"Instagram download error: {e}")
-            if "403 Forbidden" in str(e) or "login required" in str(e) or "Too many requests" in str(e):
-                error_msg = "❌ Gagal: Instagram memblokir saya (403). Sesi login mungkin tidak valid atau terlalu banyak permintaan. Coba lagi nanti."
+            if "403 Forbidden" in str(e) or "login_required" in str(e) or "Too many requests" in str(e):
+                error_msg = "❌ Gagal: Instagram memblokir saya (Login/403). Sesi login mungkin perlu diverifikasi di HP/Browser."
             else:
                 error_msg = f"❌ Instagram Error: {e}"
                 
@@ -103,7 +109,6 @@ class InstagramDownloader:
             return False
 
         finally:
-            # Membersihkan folder 'ig_temp_...' (yang berisi sub-folder)
             if target_dir and os.path.exists(target_dir):
                 try:
                     shutil.rmtree(target_dir)
