@@ -1,6 +1,12 @@
 .handler-saves
 
 .env
+cookies.txt
+ig_session/
+downloads/
+temp_compress/
+temp_conversions/
+temp_convert/
 .venv/
 
 __pycache__/

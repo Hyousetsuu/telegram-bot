@@ -8,6 +8,7 @@ from telebot import types
 from features.downloader.youtube_downloader import YouTubeDownloader
 from features.downloader.tiktok_downloader import TikTokDownloader
 from features.downloader.instagram_downloader import InstagramDownloader
+from features.downloader.facebook_downloader import FacebookDownloader # TAMBAHAN FB
 from features.ai.gemini_assistant import GeminiAssistant
 from features.tools.compressor import Compressor      
 from features.tools.file_converter import FileConverter  
@@ -33,6 +34,7 @@ def detect_platform(url: str):
     if any(x in url for x in ["youtube.com", "youtu.be"]): return "youtube"
     elif any(x in url for x in ["tiktok.com", "vm.tiktok.com", "vt.tiktok.com"]): return "tiktok"
     elif any(x in url for x in ["instagram.com", "instagr.am"]): return "instagram"
+    elif any(x in url for x in ["facebook.com", "fb.watch", "fb.com"]): return "facebook" # DETEKSI FB
     return None
 
 def format_uptime(seconds):
@@ -58,6 +60,7 @@ def register_handlers(bot):
     yt = YouTubeDownloader(bot)
     tt = TikTokDownloader(bot)
     ig = InstagramDownloader(bot)
+    fb = FacebookDownloader(bot) # INSTANSIASI FB
     ai = GeminiAssistant(bot)
     compressor = Compressor(bot) 
     converter = FileConverter(bot) 
@@ -67,7 +70,7 @@ def register_handlers(bot):
     # ========================================================
     @bot.message_handler(commands=['ping'])
     def handle_ping(message):
-        """Menampilkan status server, penggunaan resource, dan uptime."""
+        """Menampilkan status server, penggunaan resource, uptime, dan antrean."""
         try:
             start_time = time.time()
             msg = bot.reply_to(message, "🔄 Pinging...")
@@ -95,21 +98,21 @@ def register_handlers(bot):
             
             cpu_usage = psutil.cpu_percent(interval=0.1)
             cpu_cores = psutil.cpu_count(logical=False) or psutil.cpu_count()
-
-            # --- TAMBAHAN BARU: STORAGE ---
-            disk = psutil.disk_usage('/')
-            disk_used_gb = disk.used / (1024 * 1024 * 1024)
-            disk_total_gb = disk.total / (1024 * 1024 * 1024)
-            disk_percent = disk.percent
-
-            # --- TAMBAHAN BARU: STATISTIK BOT ---
-            total_antrean = len(pending_links)
             
             try:
                 load1, load5, load15 = os.getloadavg()
                 load_str = f"{load1:.2f} | {load5:.2f} | {load15:.2f}"
             except:
                 load_str = "N/A"
+
+            # Disk Storage Data
+            disk = psutil.disk_usage('/')
+            disk_used_gb = disk.used / (1024 * 1024 * 1024)
+            disk_total_gb = disk.total / (1024 * 1024 * 1024)
+            disk_percent = disk.percent
+            
+            # Data Antrean Bot
+            total_antrean = len(pending_links)
 
             ping_text = f"""🏓 Pong!
 ━━━━━━━━━━━━━━━━━━
@@ -129,7 +132,9 @@ def register_handlers(bot):
 
 📊 RESOURCE USAGE
 ├ CPU Usage: {cpu_usage}% [{get_progress_bar(cpu_usage)}]
+├ Load Avg: {load_str}
 ├ RAM: {ram_used_mb:.1f} MB / {ram_total_gb:.2f} GB ({ram.percent}%)
+│  [{get_progress_bar(ram.percent)}]
 ├ RAM Bot: {bot_ram_mb:.1f} MB
 └ Disk: {disk_used_gb:.1f} GB / {disk_total_gb:.1f} GB ({disk_percent}%)
    [{get_progress_bar(disk_percent)}]
@@ -210,6 +215,8 @@ def register_handlers(bot):
                 bot.send_message(message.chat.id, "🎬 Pilih format unduhan TikTok:", reply_markup=markup)
             elif platform_type == "instagram":
                 ig.download(message, url)
+            elif platform_type == "facebook":  # ROUTING FB
+                fb.download(message, url)
             else:
                 ai.reply(message)
         except Exception as e:

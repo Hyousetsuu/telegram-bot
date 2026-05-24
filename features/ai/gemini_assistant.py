@@ -37,7 +37,7 @@ class GeminiAssistant:
         """
 
         self.model = genai.GenerativeModel(
-            model_name="models/gemini-2.5-flash",
+            model_name="models/gemini-3.1-flash-lite",
             system_instruction=SYSTEM_PROMPT
         )
 
