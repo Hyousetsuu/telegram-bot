@@ -9,6 +9,7 @@ from features.downloader.youtube_downloader import YouTubeDownloader
 from features.downloader.tiktok_downloader import TikTokDownloader
 from features.downloader.instagram_downloader import InstagramDownloader
 from features.downloader.facebook_downloader import FacebookDownloader # TAMBAHAN FB
+from features.downloader.twitter_downloader import TwitterDownloader # TAMBAHAN TWITTER
 from features.ai.gemini_assistant import GeminiAssistant
 from features.tools.compressor import Compressor      
 from features.tools.file_converter import FileConverter  
@@ -35,6 +36,7 @@ def detect_platform(url: str):
     elif any(x in url for x in ["tiktok.com", "vm.tiktok.com", "vt.tiktok.com"]): return "tiktok"
     elif any(x in url for x in ["instagram.com", "instagr.am"]): return "instagram"
     elif any(x in url for x in ["facebook.com", "fb.watch", "fb.com"]): return "facebook" # DETEKSI FB
+    elif any(x in url for x in ["twitter.com", "x.com"]): return "twitter"
     return None
 
 def format_uptime(seconds):
@@ -61,6 +63,7 @@ def register_handlers(bot):
     tt = TikTokDownloader(bot)
     ig = InstagramDownloader(bot)
     fb = FacebookDownloader(bot) # INSTANSIASI FB
+    tw = TwitterDownloader(bot)
     ai = GeminiAssistant(bot)
     compressor = Compressor(bot) 
     converter = FileConverter(bot) 
@@ -217,6 +220,8 @@ def register_handlers(bot):
                 ig.download(message, url)
             elif platform_type == "facebook":  # ROUTING FB
                 fb.download(message, url)
+            elif platform_type == "twitter":
+                tw.download(message, url)
             else:
                 ai.reply(message)
         except Exception as e:
