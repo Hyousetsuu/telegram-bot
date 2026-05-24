@@ -21,6 +21,8 @@ Semua fitur dirancang untuk bekerja secara intuitif — cukup kirim link untuk m
 - **YouTube:** Unduh video (MP4) atau audio (MP3) secara otomatis.  
 - **TikTok:** Unduh video tanpa watermark, audio, atau slideshow gambar.  
 - **Instagram:** Unduh foto atau video (Reels/Post).  
+- **Facebook:** Unduh foto, album, atau video (Reels/Watch).
+- **Twitter (X):** Unduh video, GIF, atau galeri foto dari tweet.
 
 ---
 
@@ -41,7 +43,7 @@ Bot ini menggunakan *smart handler* — cukup kirim file, dan bot akan menawarka
 | **Bahasa Pemrograman** | Python 3.10+ |
 | **Framework Bot** | [pyTelegramBotAPI](https://github.com/eternnoir/pyTelegramBotAPI) |
 | **Model AI** | [google-generativeai](https://pypi.org/project/google-generativeai/) |
-| **Downloader** | yt-dlp (YouTube/TikTok), instaloader (Instagram) |
+| **Downloader** | yt-dlp (YouTube/TikTok/Facebook/Twitter), gallery-dl (FB/Twitter), instaloader (Instagram) |
 | **Manipulasi File** | Pillow, pikepdf, PyMuPDF (fitz) |
 | **Layanan Informasi** | gnews, requests |
 | **Konfigurasi Lingkungan** | python-dotenv |
@@ -86,6 +88,9 @@ OPENWEATHER_API_KEY="abcdef..."
 # (Opsional - agar download Instagram lebih stabil)
 INSTAGRAM_USER="username_ig_anda"
 INSTAGRAM_PASS="password_ig_anda"
+
+# (Opsional - untuk Facebook & Twitter)
+# Salin isi dari cookies Anda ke file bernama `cookies.txt` (bisa gunakan `cookies.example.txt` sebagai referensi).
 5️⃣ Jalankan Bot
 bash
 Salin kode
